@@ -1,0 +1,14 @@
+/* Reuse Mantine tokens, with readable secondary text in both existing modes. */
+:root[data-mantine-color-scheme="light"] { --mantine-color-dimmed: var(--mantine-color-gray-7); }
+:root[data-mantine-color-scheme="dark"] { --mantine-color-dimmed: var(--mantine-color-gray-4); }
+:focus-visible { outline: 2px solid var(--mantine-color-blue-8); outline-offset: 3px; }
+summary { cursor: pointer; min-height: 28px; }
+[data-mantine-color-scheme="light"] .mantine-Anchor-root { color: var(--mantine-color-blue-8); }
+[data-mantine-color-scheme="dark"] .mantine-Anchor-root { color: var(--mantine-color-blue-3); }
+.mantine-Button-root[data-variant="default"], .mantine-Input-input { border-color: var(--mantine-color-gray-6); }
+.skip-link { position: absolute; inset-inline-start: -10000px; }
+.skip-link:focus-visible { position: static; display: block; padding: var(--mantine-spacing-xs); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+@media (forced-colors: active) { :focus-visible { outline-color: Highlight; } }
