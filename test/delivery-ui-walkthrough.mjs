@@ -31,20 +31,22 @@ try {
  await page.getByLabel('Planning provider', { exact: true }).waitFor();
  assert.equal(await page.getByLabel('Planning provider', { exact: true }).inputValue(), 'openai');
  assert.equal(await page.getByLabel('Exact planning model', { exact: true }).inputValue(), 'gpt-6-astra');
- await page.getByLabel('Planning provider', { exact: true }).selectOption('claude');
- await keyActivate(button('Reload latest saved state')); assert.equal(await page.getByLabel('Planning provider', { exact: true }).inputValue(), 'claude', 'explicit selection preserved');
+ await page.getByLabel('Planning provider', { exact: true }).selectOption('');
+ await keyActivate(button('Reload latest saved state')); assert.equal(await page.getByLabel('Planning provider', { exact: true }).inputValue(), '', 'explicit local selection preserved');
  await page.getByLabel('Planning provider', { exact: true }).selectOption('openai'); await page.getByLabel('Exact planning model', { exact: true }).selectOption('gpt-6-astra');
  for (const [label,text] of [['Delivery goal','Daily whole member onboarding'],['Intended user','Synthetic members'],['Target daily workflow','Complete onboarding from first visit through durable completion'],['Current stage and unknowns','Synthetic prototype; no live acceptance']]) { const input = page.getByLabel(label, { exact: true }); await input.focus(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.type(text); }
  // Both recoverable server errors and revision conflicts must preserve form drafts.
  for (const status of [503,409]) { await page.route('**/delivery/goal', r => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error: 'Synthetic save conflict; draft retained' }) })); await keyActivate(button('Save delivery settings')); await page.getByRole('alert').waitFor(); assert.equal(await page.getByLabel('Intended user', { exact: true }).inputValue(), 'Synthetic members'); await page.unroute('**/delivery/goal'); }
- await keyActivate(button('Save delivery settings')); await page.getByText('Goal saved. Select context and collect a local preview.', { exact: true }).waitFor();
+ await keyActivate(button('Save delivery settings')); await page.getByText('Goal saved. Define a finish line or choose optional model planning.', { exact: true }).waitFor();
+ await disclosure('Optional model planning: context and external-send approval');
  await keyActivate(button('Collect local preview')); const packet = JSON.parse(await page.getByLabel('Exact context packet for approval').inputValue()); assert.equal(packet.model, 'gpt-6-astra');
  assert.equal(await button('Generate plan').isDisabled(), true);
  await shot('context-preview');
  const approved = page.waitForRequest(r => r.url().endsWith('/context/approve')); await keyActivate(button('Approve this exact packet for external planning')); assert.equal((await approved).postDataJSON().fingerprint, packet.fingerprint);
  await page.getByText('Exact context approved. Generate or Replan sends it to the selected provider.', { exact: true }).waitFor();
- await disclosure('Context selection and external-send approval'); await keyActivate(button('Generate plan')); await page.getByText('Planning: pending', { exact: true }).waitFor();
+ await disclosure('Optional model planning: context and external-send approval'); await keyActivate(button('Generate plan')); await page.getByText('Planning: pending', { exact: true }).waitFor();
  const posts = mutations.length; let polls = 0; page.on('request', r => { if (r.url().includes('/operations/') && r.method() === 'GET') polls++; });
+ await disclosure('Legacy milestone queue and reports');
  await page.getByRole('heading', { name: 'Whole guided member onboarding', exact: true }).waitFor(); assert.ok(polls >= 1); assert.equal(mutations.length, posts, 'pending polling never POSTs');
  await disclosure('Scope, acceptance and prerequisites'); await disclosure('Preview exact EZ Coder task');
  const task = await page.getByLabel('Exact task text', { exact: true }).inputValue(); assert.match(task, /whole/i);
@@ -64,7 +66,7 @@ try {
  await page.unroute('**/delivery/*/complete'); await keyActivate(button('Retry original completion'));
  await page.getByRole('heading',{name:'Staff review and corrections',exact:true}).waitFor(); assert.deepEqual(completionBodies[1],completionBodies[0]);
  await page.waitForFunction(() => document.activeElement?.textContent === 'Staff review and corrections'); await shot('completion-next-focus');
- const url = page.url(); await page.reload(); await page.getByRole('heading',{name:'Staff review and corrections',exact:true}).waitFor(); assert.equal(page.url(),url);
+ const url = page.url(); await page.reload(); await disclosure('Legacy milestone queue and reports'); await page.getByRole('heading',{name:'Staff review and corrections',exact:true}).waitFor(); assert.equal(page.url(),url);
  await disclosure('Block, reopen, next milestones and history'); await page.getByLabel('Exact prerequisite or reason to reopen').fill('Synthetic owner approval missing'); await keyActivate(button('Block current milestone')); await page.getByText('Status: blocked', { exact:true }).waitFor();
  await page.getByLabel('Exact prerequisite or reason to reopen').fill('Synthetic approval supplied'); await keyActivate(button('Reopen Staff review and corrections')); await page.getByRole('heading',{name:'Staff review and corrections',exact:true}).waitFor();
  const deliveryUrl = mutations.find(u=>u.endsWith('/goal')).replace(/\/goal$/,''); const saved = await page.evaluate(async url => (await fetch(url)).json(), deliveryUrl); assert.equal(saved.state.history.filter(e=>e.kind==='complete').length,1); assert.ok(saved.state.history.some(e=>e.kind==='block')); assert.ok(saved.state.history.some(e=>e.kind==='reopen'));

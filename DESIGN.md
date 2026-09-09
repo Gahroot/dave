@@ -1,6 +1,43 @@
 # Decision queue design and evidence
 
-## Step 12 synthetic browser evidence (8 September 2026)
+## Coordination workflow (9 September 2026)
+
+**Design read:** same local single-operator app, now with a finite delivery job:
+identify the next eligible capability, transfer it, review returned evidence, and
+stop at the agreed gate. Reuse Mantine typography, shared rail/cards, native
+summary/details, labelled text fields/selects and CopyText fallback. No new visual
+system, dependencies, icons or decorative metrics. Today stays compact; scope,
+planning and full history live in project details or disclosures.
+
+**Evidence/thesis:** local DeliveryView and ProjectCard are the primary visual
+references. MCPJam's actionable-findings task prompt and elizaOS's structured
+completion/independent review inspired the exchange, not the visual styling.
+Outcome and next action lead; setup and all-history tools are secondary. Reports
+are explicitly labelled claims; accepting them is a separate human action.
+
+**Observed:** the legacy delivery walkthrough and new coordination walkthrough pass
+in Chromium 148.0.7778.96 with keyboard activation, labelled review/import forms,
+clipboard denial, stale-state preservation, a lost response after actual database
+save, exact retry, three accepted capabilities, prerequisite resolution, finite
+finish, restart/reload persistence and chosen Today focus. No provider POST occurs
+in the new flow. Desktop and 320px/200% root-text captures were inspected. The
+first pass showed stale model-success/setup messaging during local coordination;
+removed that misleading status and clarified the saved-goal next action, rebuilt,
+and reran both flows. Existing long-label wrapping and text/control roles are
+retained; no horizontal overflow occurred in the tested completion view.
+
+The actual chosen project was also rendered in Today with its saved four-capability
+pilot, zero accepted criteria, unresolved live prerequisites and a prepared first
+assignment. That screenshot is private and ignored, not synthetic product proof.
+
+**Limits:** reuse is not an accessibility certificate. Screen-reader output,
+exhaustive Tab order/target-spacing and all-state contrast, true browser zoom,
+non-Chromium browsers, field performance and actual operator time savings remain
+unverified. Existing theme contrast samples apply only to those measured roles.
+No WCAG/ADA conformance, independently verified project completion or live pilot
+acceptance is claimed. Generated screenshots stay under `.ezcoder/screenshots/`.
+
+## Historical Step 12 synthetic browser evidence (8 September 2026)
 
 Added `test/delivery-ui-fixture.ts` and `test/delivery-ui-walkthrough.mjs`. Fixture uses separate temporary source home and appHome, port 4320, an injected ProviderService/auth owner and delayed fake inference returning three whole capabilities. No real authentication, Keychain, provider inference, external client data, live server or live database was used. The older fixture now uses the retained EZBoss legacy attention input instead of forbidden EZ Coder tasks. Its walkthrough follows the new Home project-details link and copies notes from project details, preserving the same editing, failure/retry, focus, polling and clipboard assertions. Both browser walkthroughs passed in the parent run; these expectation changes implement the approved separation of notes from milestones, not suppressed failures.
 

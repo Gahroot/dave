@@ -18,6 +18,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function App() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [deliveryFocus, setDeliveryFocus] = useState<string | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -28,6 +29,11 @@ export function App() {
   const saving = useRef(false);
   const lastLoad = useRef(0);
   const [route, setRoute] = useState(() => window.location.hash);
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<{ projectId: string | null }>("/api/delivery/focus", { signal: controller.signal }).then(value => setDeliveryFocus(value.projectId)).catch(() => { if (!controller.signal.aborted) setError("Could not load delivery focus. Reload before choosing work."); });
+    return () => controller.abort();
+  }, [route]);
   const [view, params = ""] = route.slice(1).split("?");
   const tab = view === "projects" || view === "issues" || view === "connections" ? view : "queue";
   const query = new URLSearchParams(params);
@@ -151,7 +157,7 @@ export function App() {
             {tab === "queue" && <>
               <Text size="sm">Coverage: {portfolio.coverage?.checked ?? 0} checked · {portfolio.coverage?.cached ?? 0} cached / not deep checked · {portfolio.coverage?.unavailable ?? 0} unavailable</Text>
               {!!portfolio.coverage?.waitingOutsideCap && <Group gap="xs"><Text size="sm">{portfolio.coverage.waitingOutsideCap} waiting projects are outside the scan.</Text><Button component="a" href="#projects?waiting=1" variant="default">View waiting projects</Button></Group>}
-              {(() => { const candidates = [...portfolio.active, ...portfolio.other].filter(p => !p.override.hidden); const project = candidates.find(p => p.override.pinned) ?? portfolio.active.find(p => !p.override.hidden); return project ? <DeliveryView key={project.id} project={project} today /> : <Alert title="Today's project milestone">Choose and pin a project in <a href="#projects">Projects</a> to set up its delivery plan.</Alert>; })()}
+              {(() => { const candidates = [...portfolio.active, ...portfolio.other].filter(p => !p.override.hidden); const project = deliveryFocus === undefined ? undefined : deliveryFocus ? candidates.find(p => p.id === deliveryFocus) : candidates.find(p => p.override.pinned) ?? portfolio.active.find(p => !p.override.hidden); return project ? <DeliveryView key={project.id} project={project} today /> : <Alert title="Today's project milestone">{deliveryFocus === undefined ? "Loading delivery focus." : deliveryFocus ? "Your chosen delivery project is hidden or unavailable. Unhide it or choose another focus in Projects." : <>Choose a project in <a href="#projects">Projects</a> to set up its delivery plan.</>}</Alert>; })()}
               <TodayView returnId={query.get("item")} portfolio={portfolio} busyId={busyId} onResolve={resolve} onSeen={seen} actions={(item) => {
                 const p = [...portfolio.active, ...portfolio.other, ...portfolio.hidden].find((p) => p.id === item.projectId);
                 return p ? <Group align="flex-start" gap="xs">

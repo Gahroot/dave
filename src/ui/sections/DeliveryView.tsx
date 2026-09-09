@@ -7,14 +7,17 @@ import type { GenerationOperation } from "../../model/delivery-planner.ts";
 import { deliveryAssignment } from "../delivery-handoff.ts";
 import { deliveryApi, DeliveryRequestError } from "../delivery-api.ts";
 import { CopyText } from "../components/CopyText.tsx";
+import { DeliveryCoordination } from "./DeliveryCoordination.tsx";
+import type { CoordinationState } from "../../model/delivery-coordination.ts";
 
-type Result = { state?: DeliveryState; operation?: GenerationOperation | null; recovery?: string | null };
+type Result = { coordination?: CoordinationState; state?: DeliveryState; operation?: GenerationOperation | null; recovery?: string | null };
 const initialGoal: DeliveryGoal = { goal: "Daily usability", intendedUser: "", workflow: "", stage: "", provider: null, model: null, consent: null };
 const categories: ContextCategory[] = ["goal", "documents", "manifest", "entrypoints", "coverage", "history"];
 const documents = ["README.md", "PRODUCT.md", "SCOPE.md", "BRIEF.md", "SPEC.md", "ARCHITECTURE.md", "docs/PRODUCT.md", "docs/ARCHITECTURE.md"];
 export function DeliveryView({ project, today = false }: { project: PortfolioProject; today?: boolean }) {
   const base = `/api/projects/${encodeURIComponent(project.id)}/delivery`;
   const [state, setState] = useState<DeliveryState | null>(null);
+  const [coordination, setCoordination] = useState<CoordinationState | null>(null);
   const [operation, setOperation] = useState<GenerationOperation | null>(null);
   const [goal, setGoal] = useState<DeliveryGoal>(initialGoal);
   const initialized = useRef(false);
@@ -23,6 +26,9 @@ export function DeliveryView({ project, today = false }: { project: PortfolioPro
   const [selection, setSelection] = useState<ContextCategory[]>(["goal"]);
   const [docs, setDocs] = useState<string[]>([]);
   const [contextDirty, setContextDirty] = useState(false);
+  const [documentPath, setDocumentPath] = useState("");
+  const [documentReview, setDocumentReview] = useState<{ path: string; text: string; reviewedSha256: string; excerptTruncated: boolean } | null>(null);
+  const [reviewedDocuments, setReviewedDocuments] = useState<{ path: string; reviewedSha256: string }[]>([]);
   const [preview, setPreview] = useState<{ packet: DeliveryContextPacket; expectedRevision: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
@@ -34,6 +40,7 @@ export function DeliveryView({ project, today = false }: { project: PortfolioPro
   const completion = useRef<{ id: string; revision: number; key: string; report: { outcome: string; evidence: string } } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const accept = (result: Result) => {
+    if (result.coordination) setCoordination(result.coordination);
     if (result.state) { setState(result.state); if (!initialized.current) { setGoal(result.state.goal ?? initialGoal); initialized.current = true; } }
     if (result.operation !== undefined) setOperation(result.operation);
     if (result.recovery) { setNotice(result.recovery); setPreview(null); setContextDirty(true); }
@@ -69,7 +76,7 @@ export function DeliveryView({ project, today = false }: { project: PortfolioPro
   const run = async (path: string, body: object = {}, success?: (result: Result) => void) => {
     if (!state || lock.current) return;
     lock.current = true; setBusy(true); setError("");
-    try { const result = await deliveryApi<Result>(`${base}/${path}`, { expectedRevision: state.revision, ...body }); accept(result); success?.(result); }
+    try { const result = await deliveryApi<Result>(`${base}/${path}`, { expectedRevision: state.revision, ...body }); accept(result); if (result.state && !result.coordination) await load(); success?.(result); }
     catch (e) {
       if (e instanceof DeliveryRequestError && e.state) setState(e.state);
       if (e instanceof DeliveryRequestError && e.status === 409) { setPreview(null); setContextDirty(true); if (!e.state) await load(); }
@@ -104,6 +111,8 @@ export function DeliveryView({ project, today = false }: { project: PortfolioPro
     <Button variant="default" disabled={busy} onClick={() => void load()}>Reload latest saved state</Button>
     {!state && <Text>Loading saved delivery state. If it stays unavailable, use Reload latest saved state.</Text>}
     {state && <>
+      {coordination && <DeliveryCoordination project={project} state={state} coordination={coordination} onSaved={accept} today={today} disabled={busy || pending} />}
+      {!coordination?.contract && <details><summary>Legacy milestone queue and reports</summary>
       <Title order={3} ref={heading} tabIndex={-1}>{milestone?.title ?? (exhausted ? "Saved milestone queue exhausted" : plan ? "No eligible milestone: review prerequisites" : "No delivery milestone yet")}</Title>
       {milestone ? <>
         <Text size="lg">{milestone.outcome}</Text><Text>Status: {milestone.status}</Text><Text><strong>Why now:</strong> {milestone.whyNow}</Text>
@@ -111,7 +120,7 @@ export function DeliveryView({ project, today = false }: { project: PortfolioPro
         <details><summary>Scope, acceptance and prerequisites</summary><Stack gap="xs">{([['Included scope', milestone.scope], ['Acceptance criteria', milestone.acceptance], ['Exclusions', milestone.exclusions], ['Human prerequisites', milestone.humanPrerequisites], ['Source references', milestone.sourceIds], ['Assumptions', plan!.assumptions]] as [string, string[]][]).map(([label, values]) => <div key={label}><Text fw={600}>{label}</Text><ul>{values.map((v, i) => <li key={i}>{v}</li>)}</ul></div>)}<Text>Dependencies: {milestone.dependencies.map(i => plan!.milestones[i]?.title).join("; ") || "None saved"}</Text></Stack></details>
         {assignmentError ? <Alert color="red">{assignmentError}</Alert> : <><CopyText text={assignment} label="Copy task for EZ Coder" /><details><summary>Preview exact EZ Coder task</summary><Textarea label="Exact task text" value={assignment} readOnly autosize minRows={5} maxRows={16} /></details></>}
         <details><summary>Complete and continue: user-reported outcome</summary><Stack gap="sm" mt="sm">
-          <Text>This saves your report, not independent proof, client acceptance or launch readiness. Copying does not complete work. Exhaustion may attempt one approved next-plan request; changed context requires fresh approval.</Text>
+          <Text>This saves your report, not independent proof, client acceptance or launch readiness. Copying does not complete work. Exhaustion never starts model planning automatically. Adopt a bounded finish line above to review evidence before advancing.</Text>
           <Textarea label="Delivered outcome" maxLength={4000} value={outcome} disabled={!!completion.current || busy} onChange={e => setOutcome(e.currentTarget.value)} autosize minRows={2} />
           <Textarea label="Runtime/test evidence, unverified claims and remaining blockers" maxLength={8000} value={evidence} disabled={!!completion.current || busy} onChange={e => setEvidence(e.currentTarget.value)} autosize minRows={3} />
           {completion.current && <Text>A submission is retained for an exact, idempotent retry. Reload checks saved state without discarding it.</Text>}
@@ -127,24 +136,37 @@ export function DeliveryView({ project, today = false }: { project: PortfolioPro
         {state.history.map(event => <div key={event.id}><Text>{event.kind === "complete" ? "Reported complete" : event.kind} · {event.source} · {new Date(event.createdAt).toLocaleString()}</Text><Text style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(event.detail, null, 2)}</Text></div>)}
         {!state.history.length && <Text>No saved delivery history.</Text>}
       </Stack></details>
-      {operation && <Text role="status">Planning: {operation.status}{operation.error ? ` · ${operation.error}. Review a fresh preview and retry explicitly.` : ""}</Text>}
+      </details>}
+      {operation && (pending || !coordination?.contract) && <Text role="status">Planning: {operation.status}{operation.error ? ` · ${operation.error}. Review a fresh preview and retry explicitly.` : ""}</Text>}
       {pending && <Button variant="default" disabled={busy} onClick={() => void run("cancel", { operationId: operation!.id })}>Cancel planning</Button>}
       {!today && <>
         <details open={!state.goal}><summary>Delivery goal and planning setup</summary><Stack gap="sm" mt="sm" data-summary-editing={dirty || undefined}>
           <Text>Saving settings invalidates prior context approval. Form drafts stay here on errors or conflicts.</Text>
           {([['goal', 'Delivery goal'], ['intendedUser', 'Intended user'], ['workflow', 'Target daily workflow'], ['stage', 'Current stage and unknowns']] as const).map(([key, label]) => <TextInput key={key} label={label} value={goal[key]} maxLength={key === 'goal' || key === 'workflow' ? 4000 : 1000} disabled={busy || pending} onChange={e => updateGoal({ [key]: e.currentTarget.value })} />)}
-          <NativeSelect label="Planning provider" value={goal.provider ?? ""} disabled={busy || pending} onChange={e => updateGoal({ provider: (e.currentTarget.value || null) as DeliveryGoal['provider'], model: null })} data={[{ value: "", label: "Select provider" }, { value: "openai", label: "OpenAI subscription" }, { value: "claude", label: "Anthropic / Claude: unavailable" }]} />
+          <NativeSelect label="Planning provider" value={goal.provider ?? ""} disabled={busy || pending} onChange={e => updateGoal({ provider: (e.currentTarget.value || null) as DeliveryGoal['provider'], model: null })} data={[{ value: "", label: "Local coordination (no provider required)" }, { value: "openai", label: "OpenAI subscription" }, ...(goal.provider === "claude" ? [{ value: "claude", label: "Saved Claude selection (planning unsupported)" }] : [])]} />
           <NativeSelect label="Exact planning model" value={goal.model ?? ""} disabled={busy || pending} onChange={e => updateGoal({ model: e.currentTarget.value || null })} data={[{ value: "", label: "Select model" }, ...(goal.provider === "openai" ? ["gpt-6-astra"] : goal.provider === "claude" ? ["claude-fable-5-1", "claude-opus-5"] : [])]} />
           {goal.provider === "claude" && <Text>Claude planning unavailable: subscription-compatible isolation from managed hooks has not been verified. No API fallback. See Connections.</Text>}
-          <Button disabled={busy || pending || !goal.goal.trim() || !goal.intendedUser.trim() || !goal.workflow.trim() || !goal.stage.trim() || !goal.provider || !goal.model} onClick={() => void run("goal", { goal: { ...goal, consent: null } }, () => { setDirty(false); setPreview(null); setNotice("Goal saved. Select context and collect a local preview."); })}>Save delivery settings</Button>
+          <Button disabled={busy || pending || !goal.goal.trim() || !goal.intendedUser.trim() || !goal.workflow.trim() || !goal.stage.trim() || (!!goal.provider && !goal.model)} onClick={() => void run("goal", { goal: { ...goal, consent: null } }, () => { setDirty(false); setPreview(null); setNotice("Goal saved. Define a finish line or choose optional model planning."); })}>Save delivery settings</Button>
         </Stack></details>
-        <details open={!state.goal?.consent}><summary>Context selection and external-send approval</summary><Stack gap="sm" mt="sm">
+        <details><summary>Optional model planning: context and external-send approval</summary><Stack gap="sm" mt="sm">
           <Text>Select bounded local context. Preview reads selected files locally, not externally. Review for private information before approving. No task lists, credentials, raw transcripts, client data or bulk source export.</Text>
           {categories.map(category => <Checkbox key={category} label={category === "goal" ? "Goal (required)" : category} checked={selection.includes(category)} disabled={category === "goal" || busy || pending} onChange={e => { const checked = e.currentTarget.checked; setSelection(s => checked ? [...s, category] : s.filter(c => c !== category)); setPreview(null); setContextDirty(true); }} />)}
           {selection.includes("documents") && documents.map(doc => <Checkbox key={doc} label={doc} checked={docs.includes(doc)} disabled={busy || pending} onChange={e => { const checked = e.currentTarget.checked; setDocs(s => checked ? [...s, doc] : s.filter(d => d !== doc)); setPreview(null); setContextDirty(true); }} />)}
+          <details><summary>Review one additional product or operations document locally</summary><Stack gap="sm">
+            <Text>Explicit docs/ or doc/ Markdown paths only, up to three nested folders. Private, client, agent, task and credential files are excluded. Full review is limited to 8KB.</Text>
+            <TextInput label="Selected document path" value={documentPath} maxLength={256} onChange={e => { setDocumentPath(e.currentTarget.value); setDocumentReview(null); }} />
+            <Button variant="default" disabled={busy || pending || !documentPath.trim()} onClick={async () => {
+              if (lock.current) return; lock.current = true; setBusy(true); setError("");
+              try { setDocumentReview(await deliveryApi(`${base}/document/review`, { expectedRevision: state.revision, path: documentPath })); }
+              catch (e) { setError(e instanceof Error ? e.message : "Local review failed"); }
+              finally { lock.current = false; setBusy(false); }
+            }}>Read this selected document locally</Button>
+            {documentReview && <><Textarea label="Full local document review" readOnly value={documentReview.text} autosize minRows={5} maxRows={14} />{documentReview.excerptTruncated && <Text>Model context would include only the first 4000 characters.</Text>}<Button variant="default" disabled={reviewedDocuments.length >= 4} onClick={() => { setReviewedDocuments(d => [...d.filter(f => f.path !== documentReview.path), { path: documentReview.path, reviewedSha256: documentReview.reviewedSha256 }]); setSelection(s => s.includes("documents") ? s : [...s, "documents"]); setPreview(null); setContextDirty(true); }}>I reviewed this; include it in the next preview</Button></>}
+            {reviewedDocuments.map(doc => <Group key={doc.path}><Text>{doc.path}</Text><Button variant="default" onClick={() => { setReviewedDocuments(d => d.filter(f => f.path !== doc.path)); setPreview(null); setContextDirty(true); }}>Remove {doc.path}</Button></Group>)}
+          </Stack></details>
           <Button variant="default" disabled={busy || pending || dirty || !state.goal?.model || project.override.hidden} onClick={async () => {
             if (lock.current) return; lock.current = true; setBusy(true); setError(""); setPreview(null); setContextDirty(true);
-            try { setPreview(await deliveryApi(`${base}/context/preview`, { expectedRevision: state.revision, permissions: { collect: true, categories: selection, documents: selection.includes("documents") ? docs : [] } })); }
+            try { setPreview(await deliveryApi(`${base}/context/preview`, { expectedRevision: state.revision, permissions: { collect: true, categories: selection, documents: selection.includes("documents") ? docs : [], additionalFiles: selection.includes("documents") ? reviewedDocuments : [] } })); }
             catch (e) { if (e instanceof DeliveryRequestError && e.state) setState(e.state); setError(e instanceof Error ? e.message : "Preview failed. Retry."); }
             finally { lock.current = false; setBusy(false); }
           }}>Collect local preview</Button>

@@ -1,4 +1,5 @@
 import { migrateDelivery } from "./migrations/005-delivery.ts";
+import { migrateDeliveryCoordination } from "./migrations/006-delivery-coordination.ts";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -7,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const SCHEMA = fileURLToPath(new URL("./schema.sql", import.meta.url));
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 const ATTENTION = fileURLToPath(new URL("./migrations/004_attention.sql", import.meta.url));
 
 /**
@@ -55,6 +56,7 @@ export function openDb(appHome: string, beforeMigrationCommit?: (db: Db) => void
       db.exec(fs.readFileSync(SCHEMA, "utf8").replace("PRAGMA journal_mode = WAL;", ""));
       db.exec("CREATE UNIQUE INDEX IF NOT EXISTS inbox_revision ON inbox_items(project_id, subject_key, fingerprint)");
       if (previous < 5) migrateDelivery(db);
+      if (previous < 6) migrateDeliveryCoordination(db);
       if (previous !== SCHEMA_VERSION) {
         db.exec("DELETE FROM schema_meta");
         db.prepare("INSERT INTO schema_meta (version) VALUES (?)").run(SCHEMA_VERSION);

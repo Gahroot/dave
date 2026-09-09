@@ -20,6 +20,7 @@ function fixture(origins = localBrowserOrigins(4317)) {
   registerRequestGuard(app, origins);
   let handled = 0;
   app.get("/api/providers", async () => ({ connected: false }));
+  app.get("/api/delivery/focus", async () => ({ projectId: "fixture" }));
   app.post("/api/providers/connect", async (req) => { handled++; return { accepted: req.body }; });
   app.post("/api/projects/:id/delivery/goal", async () => { handled++; return { ok: true }; });
   app.post("/api/providers/failure", async () => { throw new Error("SYNTHETIC_PROVIDER_SECRET"); });
@@ -39,6 +40,13 @@ async function token(app: FastifyInstance, requestedOrigin = origin) {
 const headers = (csrf: string) => ({ host, origin, [CSRF_HEADER]: csrf, "content-type": "application/json" });
 
 describe("local provider/planning request boundary", () => {
+  it("applies the read boundary to the chosen delivery focus", async () => {
+    const { app } = fixture();
+    expect((await app.inject({ url: "/api/delivery/focus", headers: { host } })).statusCode).toBe(403);
+    expect((await app.inject({ url: "/api/delivery/focus", headers: { host, origin: "https://untrusted.example" } })).statusCode).toBe(403);
+    const accepted = await app.inject({ url: "/api/delivery/focus", headers: { host, origin } });
+    expect(accepted.statusCode).toBe(200); expect(accepted.headers["cache-control"]).toBe("no-store");
+  });
   it("accepts configured same-origin requests and same-origin browser token fetches", async () => {
     const { app, handled } = fixture();
     const bootstrap = await app.inject({ url: CSRF_PATH, headers: { host, "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" } });

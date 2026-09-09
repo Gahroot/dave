@@ -7,7 +7,7 @@ It reads existing EZBoss, EZCoder, pew2 and Git evidence. A quiet queue is valid
 ## Run it
 
 ```bash
-npm install
+npm ci
 npm start          # builds the UI and serves it on http://127.0.0.1:4317
 ```
 
@@ -28,6 +28,44 @@ The server alone serves the last built UI; Vite proxies API requests to port 431
 - **The command center maintains its own storage automatically.** Summaries and
   rankings are generated and refreshed without you. You are not its database
   administrator.
+
+## Bounded delivery coordination (optional)
+
+DAVE can coordinate any discovered project without a model connection. External
+projects remain read-only; **you** transfer assignments and reports to/from your
+coding tool. DAVE does not execute, deploy, independently verify, or contact clients.
+
+1. Open the project, save its goal/user/workflow/stage with **Local coordination**,
+   then choose **Make this my delivery focus**. Today remembers this choice.
+2. Define 2–12 observable finish criteria, exclusions, and named human prerequisites.
+   Map criteria to milestones; unmapped criteria remain visibly uncovered.
+3. **Copy planning assignment**, review the returned 3–6-milestone JSON, and import
+   it locally. Existing code and dated reports are leads, not verified completion.
+4. **Prepare this assignment** persists its identity before copying. Only dependency-
+   ready, unblocked work is eligible. A separate review assignment is available.
+5. Paste the exact result JSON and review its preview. Saving never accepts work.
+   Failed/unrun checks, unknown criteria, and reported blockers prevent acceptance.
+6. Review all reported evidence and risks; explicitly accept or return the capability.
+   Returning or blocking upstream work invalidates dependent acceptance and handoffs,
+   but keeps reports. Changed goals/contracts/plans require fresh evidence.
+7. After all mapped criteria, milestones, and prerequisites are user-accepted, DAVE
+   stops at **Ready for pilot review**. This is not client signoff or a launch claim.
+
+A report contains a version, project/plan/milestone/handoff IDs, per-criterion
+observations, command strings/exit codes, blockers and risks. Commands and paths
+remain inert text. Empty command arrays support manual observations; listed unrun
+commands must have a null exit code, not zero. Exact retries after a lost response
+are deduplicated. On conflict, reload saved state; drafts remain until you clear them.
+
+Optional model planning still requires an explicit provider/model and exact context
+approval. Selected nested `docs/` or `doc/` Markdown can be reviewed locally by exact
+path (8KB maximum); excluded/private names and symlinks outside the project fail
+closed. This is not a recursive repository audit. Context uses excerpts and names
+its truncation. No task lists, credentials, client uploads, or agent-state documents
+are approved through this feature. Completion never automatically calls a provider.
+
+Legacy reports remain available as **Legacy milestone queue and reports** until a
+finish contract is adopted. They are historical claims, not grandfathered acceptance.
 
 ## Daily flow
 

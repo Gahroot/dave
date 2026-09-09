@@ -20,7 +20,7 @@ export async function deliveryApi<T>(url: string, body?: unknown): Promise<T> {
   const result = await response.json();
   if (!response.ok) {
     if (response.status === 403) csrf = undefined;
-    throw new DeliveryRequestError(`${result.message ?? result.error ?? "Request failed"}. ${response.status === 409 ? "Latest saved state loaded; your draft is retained. Review it before retrying." : "Your draft is retained. Check Connections or retry when ready."}`, response.status, result.state);
+    throw new DeliveryRequestError(`${result.message ?? result.error ?? "Request failed"}. ${response.status === 409 ? "Reload latest saved state; your draft is retained. Review it before retrying." : "Your draft is retained. Check Connections or retry when ready."}`, response.status, result.state);
   }
   return result as T;
 }

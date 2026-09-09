@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Db } from "./index.ts";
+import { semanticGoal } from "../model/delivery-progress.ts";
 import type { CompletionReport, DeliveryEvent, DeliveryGoal, DeliveryPlanDraft, DeliveryState, MilestoneDefinition } from "../model/delivery-schema.ts";
 
 export class DeliveryError extends Error {
@@ -136,11 +137,14 @@ export function deliveryRepo(db: Db, clock = () => new Date()) {
   }
   return {
     read: (projectId: string) => transaction(() => read(projectId), false),
+    /** Internal composition only: caller must own a transaction on this connection. */
+    readInTransaction: read,
     saveGoal(projectId: string, revision: number, goal: DeliveryGoal): DeliveryState {
       validateGoal(goal);
       return transaction(() => {
         const state = expected(projectId, revision);
         q.goal.run(JSON.stringify(goal), projectId);
+        if (semanticGoal(state.goal) !== semanticGoal(goal)) db.prepare("UPDATE delivery_handoffs SET active=0 WHERE project_id=? AND active=1").run(projectId);
         q.supersede.run(projectId);
         event(state, "goal", goal);
         return read(projectId);

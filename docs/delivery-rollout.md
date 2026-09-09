@@ -1,4 +1,78 @@
-# Delivery implementation checkpoint — 8 September 2026
+# Delivery coordination checkpoint: 9 September 2026
+
+## Current behavior and verification
+
+Project-agnostic, coordination-only delivery is implemented on schema v6. It works
+without credentials: chosen focus, finish criteria, prerequisites, imported bounded
+plans, persisted handoff identities, structured results, explicit human review,
+upstream invalidation, and a finite ready-for-pilot-review state. External projects
+remain read-only. No agent runner, deployment surface or automatic provider request
+was added. Queue exhaustion no longer triggers model continuation, even in legacy mode.
+
+`npm test`: **288 tests across 29 files**; `npm run typecheck`, `npm run build`,
+and `git diff --check` passed. New tests exercise real SQLite and guarded Fastify
+routes, genuine v5 rollback/restore/upgrades, semantic-goal invalidation, exact result
+retry, tampered bindings, independent branches, failed/unknown evidence, hidden
+projects, nested-document rejection, and two differently named synthetic projects.
+Historical completions do not become finish-line acceptance. The new focus-read
+namespace inherits same-origin checks; a regression test first reproduced the
+missing guard, then passed after extending the shared boundary.
+
+The legacy delivery browser flow and the new `test/coordination-ui-walkthrough.mjs`
+passed against isolated fixture storage in Chromium 148.0.7778.96. The latter
+exercised local setup, reviewed plan/result imports, clipboard denial, stale save,
+response loss after a real save, exact retry, three separate human acceptance
+commands, unresolved prerequisites, terminal readiness, reload and chosen Today
+focus. It observed zero provider POST requests and no page exceptions. Native
+keyboard activation, 320px and 200% root text reflow were exercised. Screenshots
+are ignored under `.ezcoder/screenshots/coordination`; failed captures from early
+harness-label mismatches are historical artifacts, not final acceptance evidence.
+
+## Real-code inspiration, not imported execution
+
+Requested Steroids search/show inspected MCPJam/inspector's
+`mcpjam-inspector/client/src/components/shared/actionable-insights/actionable-findings-panel.tsx`
+(`buildTaskPrompt`): one assignment carries scope, criteria, evidence and guardrails.
+grep MCP located elizaOS/eliza's
+`plugins/plugin-agent-orchestrator/src/services/completion-envelope.ts` and
+`independent-verifier.ts`; the latter was read directly from upstream source.
+These informed strict per-criterion results and the distinction between reporting
+and review. Backlog.md's `src/utils/task-edit-builder.ts` provided a smaller
+criteria-versus-summary comparison. DAVE reuses its own transactions and clipboard
+primitives instead of adopting those projects' execution engines. Prompts are not
+sandboxes, and another agent's report is not automatically trusted verification.
+
+## Local rollout performed
+
+Inventoried the normal DAVE database and found no active writers/listener before
+rollout. It was actually v4, not the v5 preview. Took a fresh SQLite-consistent local
+snapshot, restored it separately, migrated the restored copy to v6, and compared
+row counts and full-row hashes for every old data table. Restore plus upgrade and
+comparison took **77ms** on this machine. The original was then upgraded; all eight
+prior data tables matched, integrity/foreign-key checks passed, and close/reopen
+worked. The backup and restored copy remain private outside version control.
+This is a local pre-upgrade recovery point, not off-device protection or a promised
+recovery-time objective.
+
+The chosen first project now has four bounded capabilities, five finish criteria,
+four unresolved live-pilot prerequisites, and one prepared handoff. Zero capabilities
+were marked accepted. Its newer unfinished project plan, rather than an obsolete
+business-workflow proposal, informed the private setup after the user approved using
+unfinished work read-only. No project files, live credentials, client content,
+project commands, migrations/backfills, Graph calls, inference or deployments were
+used during setup. Private setup and rollout evidence remain under `.ezcoder/`.
+
+## Remaining real-world proof
+
+A prepared assignment is not execution. The operator still transfers work/results
+and explicitly accepts evidence. Real source permissions, data handling/spending
+approval, representative ground truth, restore targets and pilot reviewers remain
+unresolved prerequisites. No actual client pilot, live provider entitlement,
+screen-reader walkthrough, full accessibility audit, or measured reduction in the
+operator's weekly effort is claimed. DAVE cannot honestly claim to finish the
+external project without that work and approval.
+
+## Historical checkpoint (superseded): 8 September 2026
 
 ## Implemented
 

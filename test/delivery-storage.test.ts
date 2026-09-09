@@ -80,7 +80,7 @@ describe("additive delivery v5 migration", () => {
     const before = tables.map((t) => old.prepare(`SELECT * FROM ${t}`).all());
     old.close();
     const db = open(dir);
-    expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 5 });
+    expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 6 });
     expect(tables.map((t) => db.prepare(`SELECT * FROM ${t}`).all())).toEqual(before);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(deliveryRepo(db).read("preserved")).toMatchObject({ revision: 0, goal: null, plans: [], history: [] });

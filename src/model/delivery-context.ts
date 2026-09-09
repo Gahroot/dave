@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readOnlyFs } from "../adapters/read-only-fs.ts";
 import { MAX_FILE_BYTES } from "../core/evidence-scan.ts";
 import type { DeliveryEvent, DeliveryGoal, DeliveryPlan } from "./delivery-schema.ts";
+import type { CoordinationState } from "./delivery-coordination.ts";
 
 /** Local discovery facts for the future opt-in planner. Deliberately a field
  * allowlist, not a snapshot export: no imported tasks, summary notes, attention,
@@ -48,15 +49,24 @@ function bounded(text: string, max = 4000): string {
 }
 const productDoc = /^(?:(?:docs|doc)\/)?(?:README|PRODUCT|SCOPE|BRIEF|SPEC|ARCHITECTURE)\.md$/i;
 // Additional files are intentionally docs-only: not an arbitrary source export escape hatch.
-const extraDoc = /^(?:docs|doc)\/[a-z0-9-]{1,64}\.md$/i;
+const extraDoc = /^(?:docs|doc)\/(?:[a-z0-9-]{1,64}\/){0,3}[a-z0-9-]{1,64}\.md$/i;
 const excludedName = /task|agent|session|transcript|client|customer|upload|credential|secret|token|summary|notes|env/i;
+export function reviewableDocument(path: unknown): path is string {
+  return typeof path === "string" && path.length <= 256 && extraDoc.test(path) && !excludedName.test(path);
+}
+export async function reviewDeliveryDocument(root: string, path: unknown) {
+  if (!reviewableDocument(path)) throw new Error("Document path rejected");
+  const text = await readOnlyFs.containedFile(root, path, 8000);
+  if (text === null || !contextTextSafe(text)) throw new Error("Document unavailable, over 8KB, or contains unsafe text");
+  return { path, text, reviewedSha256: contextDigest(text), excerptTruncated: text.length > 4000 };
+}
 const entrypoints = ["src/index.ts", "src/main.ts", "src/main.tsx", "src/App.tsx", "src/server/index.ts", "app/page.tsx", "pages/index.tsx", "test/index.test.ts", "tests/test_main.py", "main.py", "src/main.rs", "main.go"];
 
 /** Local preview only. No provider calls, persistence, summary/task mining or execution.
  * All dynamic strings remain hostile quoted evidence, not planner instructions. */
 export async function collectDeliveryContext(input: {
   project: Pick<PortfolioProject, "id" | "canonicalPath">; goal: DeliveryGoal; provider: "openai" | "claude"; model: string;
-  permissions: ContextPermissions; history?: DeliveryEvent[]; plans?: DeliveryPlan[];
+  permissions: ContextPermissions; history?: DeliveryEvent[]; plans?: DeliveryPlan[]; coordination?: CoordinationState;
 }): Promise<DeliveryContextPacket> {
   const { project, goal, permissions } = input;
   if (permissions?.collect !== true || !Array.isArray(permissions.categories) || permissions.categories.length > 6 ||
@@ -78,12 +88,13 @@ export async function collectDeliveryContext(input: {
       selected.set(name, null);
     }
     for (const file of permissions.additionalFiles ?? []) {
-      if (!extraDoc.test(file.path) || excludedName.test(file.path) || !/^[a-f0-9]{64}$/.test(file.reviewedSha256)) throw new Error("File review rejected");
+      if (!reviewableDocument(file.path) || !/^[a-f0-9]{64}$/.test(file.reviewedSha256)) throw new Error("File review rejected");
       selected.set(file.path, file.reviewedSha256);
     }
     for (const [name, review] of [...selected].sort(([a], [b]) => a.localeCompare(b))) {
       const text = await readOnlyFs.containedFile(project.canonicalPath, name, MAX_FILE_BYTES);
       if (text === null || !contextTextSafe(text) || (review !== null && contextDigest(text) !== review)) throw new Error("Selected document unavailable or review stale");
+      if (text.length > 4000) limitations.push(`Selected document excerpt truncated to 4000 characters: ${name}`);
       add("documents", name, text.slice(0, 4000));
     }
   }
@@ -105,6 +116,13 @@ export async function collectDeliveryContext(input: {
   }
   if (categories.includes("coverage")) add("coverage", "Collection coverage", JSON.stringify({ selectedDocuments: sources.filter((s) => s.category === "documents").length, entrypointCandidates: categories.includes("entrypoints") ? entrypoints.length : 0, bulkSourceRead: false, independentVerification: false }));
   if (categories.includes("history")) {
+    const coordination = input.coordination;
+    if (coordination?.contract) {
+      add("history", "Bounded finish line", JSON.stringify({ outcome: coordination.contract.outcome, exclusions: coordination.contract.exclusions, goalMatches: coordination.goalMatches }), "user-reported");
+      coordination.contract.criteria.forEach((c, i) => add("history", `Finish criterion c${i}`, JSON.stringify(c), "user-reported"));
+      coordination.contract.prerequisites.forEach((p, i) => add("history", `Prerequisite p${i}`, JSON.stringify({ ...p, resolution: coordination.resolutions[`p${i}`] ?? null }), "user-reported"));
+      for (const review of coordination.decisions.slice(-12)) add("history", `User review ${review.id}`, JSON.stringify(review), "user-reported");
+    }
     if ((input.history?.length ?? 0) > 50 || (input.plans?.length ?? 0) > 10) throw new Error("History limit exceeded");
     for (const plan of input.plans ?? []) {
       if (plan.milestones.length > 6) throw new Error("Milestone history limit exceeded");
