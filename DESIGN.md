@@ -1,5 +1,56 @@
 # Decision queue design and evidence
 
+## Step 12 synthetic browser evidence (8 September 2026)
+
+Added `test/delivery-ui-fixture.ts` and `test/delivery-ui-walkthrough.mjs`. Fixture uses separate temporary source home and appHome, port 4320, an injected ProviderService/auth owner and delayed fake inference returning three whole capabilities. No real authentication, Keychain, provider inference, external client data, live server or live database was used. The older fixture now uses the retained EZBoss legacy attention input instead of forbidden EZ Coder tasks. Its walkthrough follows the new Home project-details link and copies notes from project details, preserving the same editing, failure/retry, focus, polling and clipboard assertions. Both browser walkthroughs passed in the parent run; these expectation changes implement the approved separation of notes from milestones, not suppressed failures.
+
+Production contract read: `/Applications/EZ Coder.app/Contents/Resources/sidecar/skills/evidence-led-ui/references/production-contract.md`. Scope here is native Connections and delivery goal/context/task/completion/history in Chromium 148.0.7778.96. This is partial changed-scope evidence, not WCAG/ADA conformance or overall step completion.
+
+| Changed scope | Runtime evidence / remaining gaps |
+|---|---|
+| Connections/privacy | Fake connected → disconnected → sign-in pending → success; Claude unavailable; provider response sentinel absent. Real login/expired credentials/account entitlement and exhaustive browser-storage inspection unverified. |
+| Goal and exact approval | Connected default OpenAI/gpt-6-astra; explicit Claude choice survives reload; 503 and 409 preserve drafts; Generate disabled before approval; approved fingerprint equals displayed packet. |
+| Generation | Whole onboarding, staff review and operational recovery; three pending operation GET reads, no automatic POST. |
+| Task copy | Exact preview equals successful clipboard text and denied-clipboard selectable fallback; production shared deliveryAssignment reused unchanged. |
+| Completion/history | Response lost after actual fixture save; original retry body/key unchanged; two submissions produce one saved completion. Next heading receives focus; reload retains current; block and reopen preserve history. |
+| Keyboard | Native controls activated by focus + Enter, fields typed by keyboard; visible solid 2px focus on copy. Some selects/fills use Playwright helpers; exhaustive Tab order, focus obscuration and assistive-technology output unverified. |
+| Reflow/motion | Long descriptions and open disclosures: desktop, 320px, 320px with 200% root text; no document horizontal overflow. Reduced motion, dark theme and forced colors exercised. Parent inspected desktop/dark and enlarged narrow captures, reduced narrow shared-rail/card gutters to 12px to avoid unnecessary word splitting, rebuilt and reran the browser flow successfully. Actual browser zoom, localization/text-spacing and touch remain unverified. |
+| Contrast | Sampled copy-control text 15.43:1 in light and 13.58:1 in dark theme. Other states and meaningful borders/focus contrast are not exhaustively measured; no whole-app contrast claim. |
+| Performance/support | Chromium only; field CWV, Safari/Firefox and representative screen reader unverified. No project accessibility scanner configured/added. |
+
+Verification: `npx vitest run test/delivery-*.test.ts test/provider-*.test.ts` **83 passing / 7 files**; `npm test` **277 passing / 28 files**; standalone `npm run typecheck` and separate `npm run build` passed. Build preceded browser serving dist. `node test/delivery-ui-walkthrough.mjs` passed; evidence `.ezcoder/screenshots/step12/results.json`, command logs `.ezcoder/screenshots/step12-{focused,tests,typecheck,build,browser}.log`. Final screenshots under `.ezcoder/screenshots/step12/`: `connections-connected.png`, `connections-pending.png`, `context-preview.png`, `delivery-desktop.png`, `delivery-320-100.png`, `delivery-320-200.png`, `delivery-reduced-motion.png`, `completion-next-focus.png`, `history.png`. `failure.png`/`failure.txt` are retained earlier harness-failure evidence, not final success captures. Narrow and blocked-history captures inspected: readable wrapping, native controls and explicit blocked prerequisite; parent inspected final desktop/dark/full-page and enlarged narrow viewport captures and reran after improving gutters. No functional UI fix was required for the verified flow; harness corrections used configured isolated origin and asserted retained blocked current milestone rather than expecting it removed.
+
+## Native delivery UI (step 11, 8 September 2026)
+
+Design read and reuse: inspected the existing MantineProvider theme, App shared Container rail, ProjectsView, ProjectCard four-question editor, CopyText fallback, and existing focus/reduced-motion CSS. Reused bordered md Cards, Stack/Group, native details/summary, labelled Mantine native selects, text inputs and textareas. Parent-provided corpus evidence: evroon/bracket commit 155010777739585ae0fb54e8cd42c1ff44d339d1, frontend/src/components/brackets/brackets.tsx:1–90, asynchronous Button mutation and loading-versus-empty states. No new dependencies, icons, palette or visual system.
+
+Home now leads with Today's project milestone for a visible pinned project, falling back to the current active project. The outcome leads; scope, prerequisites, next milestones and history use disclosures. Saved narrow notes never become a generated milestone. Project detail retains its four-question editor under Project notes and context, with a separately labelled context-only copy. One deliveryAssignment string powers both exact task preview and CopyText, including fixed no-live-client/production/deployment/spending/commit constraints.
+
+Flow: save goal/user/workflow/stage and exact model; explicitly select bounded context categories/documents; collect local-only preview; inspect exact packet/provider/model; approve; explicitly Generate or Replan. Selection/settings changes invalidate the local approval action. All new mutations bootstrap same-origin CSRF and send x-dave-csrf; legacy clients are unchanged. No mutation is automatically replayed. Pending operation polling is GET-only, pauses while hidden and resumes status reads without starting generation. Reload reads latest durable operation. Cancel is explicit. Completion retains its report and idempotency key through network retry, reports user provenance, preserves saved completion if continuation fails, and focuses the milestone heading after success. Conflicts preserve form drafts and show latest returned state; releasing an old completion retry is a separate deliberate action. Queue exhaustion and blocked dependencies are distinct, never fabricated recommendations.
+
+Connections exposes OpenAI storage selection, connect/restore/cancel/disconnect and textual operation/error status. Session storage is an explicit selection, not fallback. Status reads do not restore credentials or make inference requests. Claude requested models remain listed with the server's isolation blocker visible; no login, API-key fallback or boundary relaxation was introduced. Account entitlement and actual authentication remain unverified.
+
+### Step 11 original verification plan (superseded by step 12 evidence above)
+
+| Surface | Code/check evidence | Still required in step 12 |
+|---|---|---|
+| Goal/context/approval/generation | Exact route shapes inspected; typecheck and production build pass | Synthetic end-to-end preview/approval, changed-context 409, malformed model and connection failures |
+| Completion and continuation | Retained report/key, durable reload, separate retry and focus code | Network loss before/after save, reload, blocked/reopen and history interaction |
+| Clipboard | Same formatter string and existing selectable fallback | Assert preview equals clipboard, clipboard denial |
+| Keyboard/status | Semantic headings, native disclosures, labelled controls, focus styles, status text changes rather than polling counters | Keyboard-only focus order and screen-reader output |
+| Reflow/contrast/motion | Existing theme roles and reduced-motion rule reused; long button labels wrap; dark focus uses existing blue-3 | Inspect desktop/320px/200% renders; measure 4.5:1 text and 3:1 meaningful controls in both themes; reduced-motion browser checks |
+| Privacy | UI-only work; no live storage, credential, login, model or server restart exercised | Isolated fixtures first; user-assisted live checks belong to later approved steps |
+
+Earlier browser/contrast evidence below applies only to its earlier scope, not these new surfaces. No accessibility-conformance or live integration claim is made.
+
+## Delivery context boundary (approved step 7)
+
+Local collection is opt-in and separate from external-send approval. The packet itself is the preview: category-labelled sources, stable source IDs, explicit user-report provenance, limitations and a SHA-256 fingerprint bound to provider/model and exact packet contents. Later guarded routes must persist and verify approval; no routes, transmission, authentication or generation are added here.
+
+Only selected product Markdown documents are read (8 plus 4 reviewed extra documents), each capped at 64 KiB and excerpted to 4,000 characters after whole-file secret screening. Additional docs require a matching full-file review digest. Package evidence exports dependency names, not scripts/config/URLs. Entrypoints use a fixed bounded candidate list, not bulk traversal. History includes at most 10 saved milestone plans and 50 explicit Dave user completion reports, not imported tasks, legacy notes, raw sessions or model judgments. The complete packet is capped at 64,000 bytes. Rejected content produces generic errors, never file bodies.
+
+The collector reuses the read-only filesystem boundary and evidence-scan size policy, deliberately not the broad legacy documentation sweep (which includes agent/task documents). Canonical containment, regular-file checks, symlink-component rejection and bounded no-follow handle reads protect selected files. Regex screening cannot establish that arbitrary prose contains no private business data: local review and later exact-preview transmission consent remain required. Current manifest support is package.json; entrypoint coverage is explicitly partial. Parent-supplied memsearch bounded-input and supermemory validated-input controls informed this boundary; their task integration and execution mechanisms are not reused.
+
 ## Design read
 Local, single-operator application with frequent short visits and expensive context switches. The primary job is finding the next evidenced human decision, not surveying activity. Keep the existing Mantine typography, Container `lg` rail, Stack/Group spacing, bordered `md` cards and Tabler icons. No new visual dependency, imagery, theme or decorative dashboard metrics.
 

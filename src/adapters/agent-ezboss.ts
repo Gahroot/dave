@@ -1,4 +1,3 @@
-import path from "node:path";
 import { errorMessage, issue, ok } from "../core/result.ts";
 import type { Result } from "../core/result.ts";
 import { canonicalPath } from "../core/canonical-path.ts";
@@ -81,35 +80,7 @@ export function ezbossAgentState(
         return e;
       };
 
-      // EZCoder per-project task store.
-      const root = paths.ezcoder.taskProjects;
-      for (const dir of await readOnlyFs.readdir(root)) {
-        const metaPath = path.join(root, dir, "meta.json");
-        const tasksPath = path.join(root, dir, "tasks.json");
-        try {
-          const meta = await readOnlyFs.readJson<{ path?: unknown }>(metaPath);
-          if (typeof meta?.path !== "string") continue;
-          const list = await readOnlyFs.readJson<unknown>(tasksPath);
-          if (list === null) continue;
-          if (!Array.isArray(list)) {
-            issues.push(issue("agent-ezboss", "tasks.json is not an array", tasksPath));
-            continue;
-          }
-          const e = entry(canonicalPath(meta.path), "ezcoder-tasks");
-          for (const t of list as Record<string, unknown>[]) {
-            e.tasks.push({
-              id: String(t?.id ?? crypto.randomUUID()),
-              title: truncate(t?.title) ?? "Untitled task",
-              status: normalizeStatus(t?.status),
-              summary: truncate(t?.prompt),
-              updatedAt: isoOrNull(t?.updatedAt) ?? isoOrNull(t?.createdAt),
-              source: "ezcoder-tasks",
-            });
-          }
-        } catch (e) {
-          issues.push(issue("agent-ezboss", errorMessage(e), tasksPath));
-        }
-      }
+      // EZCoder task lists are never opened; discovery owns metadata.
 
       // EZBoss plan (often absent — that is normal, not an error).
       try {

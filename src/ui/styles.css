@@ -3,11 +3,20 @@
 :root[data-mantine-color-scheme="dark"] { --mantine-color-dimmed: var(--mantine-color-gray-4); }
 :focus-visible { outline: 2px solid var(--mantine-color-blue-8); outline-offset: 3px; }
 summary { cursor: pointer; min-height: 28px; }
+/* Long milestone titles and native actions reflow on the shared rail. */
+.mantine-Button-root { max-width: 100%; height: auto; min-height: var(--button-height); padding-block: 6px; }
+.mantine-Button-label { white-space: normal; overflow-wrap: anywhere; }
+.mantine-NativeSelect-input { max-width: 100%; }
+[data-mantine-color-scheme="dark"] :focus-visible { outline-color: var(--mantine-color-blue-3); }
 [data-mantine-color-scheme="light"] .mantine-Anchor-root { color: var(--mantine-color-blue-8); }
 [data-mantine-color-scheme="dark"] .mantine-Anchor-root { color: var(--mantine-color-blue-3); }
 .mantine-Button-root[data-variant="default"], .mantine-Input-input { border-color: var(--mantine-color-gray-6); }
 .skip-link { position: absolute; inset-inline-start: -10000px; }
 .skip-link:focus-visible { position: static; display: block; padding: var(--mantine-spacing-xs); }
+/* Keep the shared rail usable when text is enlarged on narrow screens. */
+@media (max-width: 480px) {
+  .mantine-Container-root, .mantine-Card-root { padding-inline: 12px; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

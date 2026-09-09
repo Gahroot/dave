@@ -1,4 +1,5 @@
 import path from "node:path";
+import { retainedTasks, retainedSummary, retainedProject, SUMMARY_POLICY } from "./task-policy.ts";
 import os from "node:os";
 import { canonicalPath, pathExists } from "../core/canonical-path.ts";
 import { detectProjects, signalForSource } from "../core/detect.ts";
@@ -125,7 +126,7 @@ export async function buildPortfolio(input: BuildInput): Promise<Result<Portfoli
 
     const exists = pathExists(canonical);
     const state = agentState.get(canonical);
-    const tasks = state?.tasks ?? [];
+    const tasks = retainedTasks(state?.tasks ?? []);
 
     const activity = emptyActivity();
     activity.lastAgentSessionAt = state?.activity.lastActivityAt ?? null;
@@ -185,7 +186,8 @@ export async function buildPortfolio(input: BuildInput): Promise<Result<Portfoli
 
   const projects: PortfolioProject[] = [];
   for (const { draft, override, relevance } of ranked) {
-    let summary = input.repo.summary(draft.id)?.summary ?? emptySummary(observedAt);
+    const saved = input.repo.summary(draft.id);
+    let summary = saved ? retainedSummary(saved.summary, saved.fingerprint.startsWith(SUMMARY_POLICY)) : emptySummary(observedAt);
 
     let scanStatus: PortfolioProject["scanStatus"] = draft.available ? "cached" : "unavailable";
     if (toSummarize.has(draft.id) && draft.exists) {
@@ -211,7 +213,7 @@ export async function buildPortfolio(input: BuildInput): Promise<Result<Portfoli
       // Regenerate only when the evidence changed, and never overwrite a
       // summary the user corrected by hand.
       if (cached?.fingerprint === fingerprint || cached?.summary.edited) {
-        summary = cached.summary;
+        summary = retainedSummary(cached.summary, cached.fingerprint === fingerprint);
       } else {
         summary = summarize(summaryInput);
         input.repo.saveSummary(draft.id, fingerprint, summary);
@@ -240,8 +242,12 @@ export async function buildPortfolio(input: BuildInput): Promise<Result<Portfoli
   const latest = input.repo.latest();
   const known = new Set(projects.map((p) => p.id));
   for (const old of [...(latest?.active ?? []), ...(latest?.other ?? []), ...(latest?.hidden ?? [])]) {
-    if (!known.has(old.id)) projects.push({ ...old, exists: pathExists(old.canonicalPath),
-      scanStatus: "unavailable", tasksObserved: false, relevance: { ...old.relevance, tier: "other" }, override: input.repo.override(old.id) });
+    if (!known.has(old.id)) {
+      const saved = input.repo.summary(old.id);
+      projects.push(retainedProject({ ...old, exists: pathExists(old.canonicalPath),
+        scanStatus: "unavailable", tasksObserved: false, override: input.repo.override(old.id) }, now,
+        retainedSummary(saved?.summary ?? old.summary, saved?.fingerprint.startsWith(SUMMARY_POLICY))));
+    }
   }
   return ok(projects, issues);
 }

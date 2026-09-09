@@ -1,3 +1,4 @@
+import { retainedIssue, retainedAttention, retainedProject, retainedSummary, SUMMARY_POLICY } from "./task-policy.ts";
 import { ezbossLinksDiscovery } from "../adapters/discovery-ezboss-links.ts";
 import { ezcoderDiscovery } from "../adapters/discovery-ezcoder.ts";
 import { pew2Discovery } from "../adapters/discovery-pew2.ts";
@@ -14,8 +15,20 @@ import type { Repo } from "../db/repo.ts";
 import type { Portfolio } from "../shared/types.ts";
 
 export function withAttention(portfolio: Portfolio, repo: Repo, now: Date): Portfolio {
-  const inbox = repo.inbox(now).filter((i) => i.projectId);
-  return { ...portfolio, inbox, today: buildToday(inbox, now), history: repo.inbox(now, true),
+  const clean = [...portfolio.active, ...portfolio.other, ...portfolio.hidden].map((p) => {
+    const saved = repo.summary(p.id);
+    return retainedProject({ ...p, override: repo.override(p.id) }, now,
+      retainedSummary(saved?.summary ?? p.summary, saved?.fingerprint.startsWith(SUMMARY_POLICY)));
+  });
+  const visible = clean.filter((p) => !p.override.hidden);
+  const active = selectActive(visible);
+  const activeIds = new Set(active.map((p) => p.id));
+  const other = visible.filter((p) => !activeIds.has(p.id)).sort(byRelevance);
+  const hidden = clean.filter((p) => p.override.hidden).sort(byRelevance);
+  const inbox = repo.inbox(now).filter((i) => i.projectId && retainedAttention(i));
+  return { ...portfolio, active, other, hidden, issues: portfolio.issues.filter(retainedIssue),
+    coverage: portfolio.coverage ? { ...portfolio.coverage, waitingOutsideCap: other.filter(hasHumanRequest).length } : undefined,
+    inbox, today: buildToday(inbox, now), history: repo.inbox(now, true).filter(retainedAttention),
     remainingCount: Math.max(0, inbox.length - 3), newCount: inbox.filter((i) => !i.seenAt).length };
 }
 

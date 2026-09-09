@@ -39,7 +39,8 @@ export function task(over: Partial<AgentTask> = {}): AgentTask {
     status: "pending",
     summary: null,
     updatedAt: AT,
-    source: "ezcoder-tasks",
+    // Generic attention fixtures exercise the retained EZBoss legacy view.
+    source: "ezboss-plan",
     ...over,
   };
 }

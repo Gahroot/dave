@@ -45,6 +45,7 @@ export function sourcePaths(
  */
 const DENIED_BASENAMES = new Set([
   "projects.json",
+  "tasks.json", // Internal agent task lists are not project/planning evidence.
   "auth.json",
   "credentials.json",
   ".env",

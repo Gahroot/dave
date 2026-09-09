@@ -23,6 +23,38 @@ async function fixture() {
 }
 
 describe("attention routes and refresh cache", () => {
+  it("records only explicit action choices and preserves unrelated saved data", async () => {
+    const f = await fixture();
+    try {
+      const project = f.repo.projects()[0];
+      if (!project) throw new Error('fixture project missing');
+      const id = project.id;
+      const other = f.repo.ensureProject('/other', 'Other', NOW.toISOString());
+      const base = { recentFocus: 'Focus', completed: 'Done', unfinished: 'Blocked', suggestedNextAction: 'Prepare case', evidence: [], generatedAt: '2026-01-01T00:00:00.000Z', edited: true };
+      f.repo.saveSummary(id, 'fingerprint', base);
+      f.repo.saveSummary(other, 'other-fingerprint', base);
+      f.repo.setOverride(id, { pinned: true, hidden: false }, NOW.toISOString());
+      const overrides = f.repo.override(id);
+      const post = (payload: unknown) => f.app.inject({ method: 'POST', url: `/api/projects/${id}/summary`, payload: JSON.stringify(payload), headers: { 'content-type': 'application/json' } });
+      expect((await post({ recentFocus: 'New focus', nextActionEditedAt: NOW.toISOString() })).statusCode).toBe(200);
+      expect(f.repo.summary(id)?.summary.nextActionEditedAt).toBeUndefined();
+      expect((await post({ suggestedNextAction: base.suggestedNextAction })).json().summary.nextActionEditedAt).toBe(NOW.toISOString());
+      f.setNow(new Date(NOW.getTime() + 60_000));
+      await post({ completed: 'Updated done' });
+      const chosen = f.repo.summary(id);
+      expect(chosen).toEqual({ fingerprint: 'fingerprint', summary: { ...base, recentFocus: 'New focus', completed: 'Updated done', nextActionEditedAt: NOW.toISOString() } });
+      for (const payload of [{ nextActionEditedAt: NOW.toISOString() }, { suggestedNextAction: 'Bad', unfinished: 12 }, { completed: {} }]) {
+        expect((await post(payload)).statusCode).toBe(400);
+        expect(f.repo.summary(id)).toEqual(chosen);
+      }
+      for (const value of [null, '', '   ']) {
+        await post({ suggestedNextAction: value });
+        expect(f.repo.summary(id)?.summary.nextActionEditedAt).toBeNull();
+      }
+      expect(f.repo.summary(other)).toEqual({ fingerprint: 'other-fingerprint', summary: base });
+      expect(f.repo.override(id)).toEqual(overrides);
+    } finally { await f.app.close(); }
+  });
   it("coalesces concurrent refreshes, honors TTL, preserves failed snapshots and retries", async () => {
     const f = await fixture();
     try {

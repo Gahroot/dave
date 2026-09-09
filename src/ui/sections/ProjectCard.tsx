@@ -19,15 +19,16 @@ import {
   IconPin,
   IconPinnedOff,
 } from "@tabler/icons-react";
-import type { PortfolioProject } from "../../shared/types.ts";
+import type { PortfolioProject, ProjectSummary } from "../../shared/types.ts";
 import { EvidenceList } from "../components/EvidenceList.tsx";
-import { EditedBadge, PinnedBadge, SuggestionBadge, TechnicalActivityBadge } from "../components/Labels.tsx";
+import { EditedBadge, PinnedBadge, TechnicalActivityBadge } from "../components/Labels.tsx";
 import { relative } from "../format.ts";
 
 const QUESTIONS = [
   { key: "recentFocus", label: "Most recently worked on" },
   { key: "completed", label: "Appears completed" },
   { key: "unfinished", label: "Unfinished or blocked" },
+  { key: "suggestedNextAction", label: "Next action" },
 ] as const;
 
 /** Observed machine facts, phrased as activity rather than progress. */
@@ -50,14 +51,15 @@ export function ProjectCard({
 }: {
   project: PortfolioProject;
   onOverride: (id: string, next: { pinned?: boolean; hidden?: boolean }) => void;
-  onCorrect: (id: string, field: string, value: string) => void;
+  onCorrect: (id: string, field: string, value: string) => Promise<ProjectSummary | null>;
   busy: boolean;
 }) {
   const [showEvidence, setShowEvidence] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const s = p.summary;
-  const hasSummary = Boolean(s.recentFocus || s.completed || s.unfinished || s.suggestedNextAction);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   return (
     <Card withBorder radius="md" padding="md">
@@ -103,67 +105,40 @@ export function ProjectCard({
           </Menu>
         </Group>
 
-        {hasSummary ? (
-          <Stack gap={6}>
-            {QUESTIONS.map(({ key, label }) => {
-              const value = s[key];
-              if (!value) return null;
-              return (
-                <Group key={key} gap="xs" align="flex-start" wrap="wrap">
-                  <Text size="xs" c="dimmed" w={{ base: "100%", sm: 150 }} style={{ flexShrink: 0 }}>
-                    {label}
-                  </Text>
-                  {editing === key ? (
-                    <Textarea
-                      size="xs"
-                      aria-label={`Correct ${label}`}
-                      autoFocus
-                      autosize
-                      flex={1}
-                      value={draft}
-                      onChange={(e) => setDraft(e.currentTarget.value)}
-                      onBlur={() => {
-                        if (draft !== value) onCorrect(p.id, key, draft);
-                        setEditing(null);
-                      }}
-                    />
-                  ) : (
-                    <Button
-                      variant="subtle"
-                      color="gray"
-                      size="sm"
-                      flex={1}
-                      styles={{ root: { height: "auto", minHeight: 32, textAlign: "start" }, label: { whiteSpace: "normal", overflowWrap: "anywhere" } }}
-                      aria-label={`Correct ${label}: ${value}`}
-                      onClick={() => {
-                        setEditing(key);
-                        setDraft(value);
-                      }}
-                    >
-                      {value}
-                    </Button>
-                  )}
+        <Stack gap="sm">
+          {QUESTIONS.map(({ key, label }) => {
+            const value = s[key];
+            const action = key === "suggestedNextAction";
+            const controlLabel = action ? "Choose/update next action" : `Correct ${label}`;
+            return <Stack key={key} gap={4}>
+              <Text size="xs" c="dimmed">{action ? (s.edited && s.nextActionEditedAt && Number.isFinite(Date.parse(s.nextActionEditedAt)) && value?.trim() ? "Chosen next action" : "Suggested next action") : label}</Text>
+              {editing === key ? <Stack gap="xs" data-summary-editing>
+                <Textarea aria-label={controlLabel} autoFocus autosize maxLength={400} value={draft} disabled={isSaving || busy}
+                  description={`${draft.length}/400 characters`} onChange={(e) => setDraft(e.currentTarget.value)} />
+                {saveError && <Text role="alert" c="red" size="sm">{saveError}</Text>}
+                <Group gap="xs">
+                  <Button loading={isSaving} disabled={busy} onClick={async () => {
+                    if (isSaving) return;
+                    setIsSaving(true); setSaveError(null);
+                    try {
+                      const saved = await onCorrect(p.id, key, draft);
+                      if (saved) setEditing(null);
+                      else setSaveError("Not saved. Your draft is retained; retry Save.");
+                    } catch { setSaveError("Not saved. Your draft is retained; retry Save."); }
+                    finally { setIsSaving(false); }
+                  }}>Save</Button>
+                  <Button variant="default" disabled={isSaving || busy} onClick={() => { setEditing(null); setDraft(""); setSaveError(null); }}>Cancel</Button>
                 </Group>
-              );
-            })}
-
-            {s.suggestedNextAction && (
-              <Group gap="xs" align="flex-start" wrap="wrap">
-                <Text size="xs" c="dimmed" w={{ base: "100%", sm: 150 }} style={{ flexShrink: 0 }}>
-                  Likely next action
-                </Text>
-                <Text size="sm" flex={1}>
-                  {s.suggestedNextAction}
-                </Text>
-                <SuggestionBadge />
-              </Group>
-            )}
-          </Stack>
-        ) : (
-          <Text size="sm" c="dimmed">
-            No recent activity to summarise.
-          </Text>
-        )}
+              </Stack> : <Button variant="subtle" color="gray" size="sm" disabled={editing !== null || busy}
+                styles={{ root: { height: "auto", minHeight: 32, textAlign: "start" }, label: { whiteSpace: "normal", overflowWrap: "anywhere" } }}
+                aria-label={action ? controlLabel : `${controlLabel}: ${value ?? "Not provided"}`}
+                onClick={() => { setEditing(key); setDraft(value ?? ""); setSaveError(null); }}>
+                {action ? `${controlLabel}: ${value ?? "Not provided"}` : value ?? "Not provided — add context"}
+              </Button>}
+            </Stack>;
+          })}
+          {s.nextActionEditedAt && Number.isFinite(Date.parse(s.nextActionEditedAt)) && <Text size="xs" c="dimmed">Action saved {new Date(s.nextActionEditedAt).toLocaleString()}</Text>}
+        </Stack>
 
         <Group gap="xs" wrap="wrap">
           <Text size="xs" c="dimmed" flex={1}>

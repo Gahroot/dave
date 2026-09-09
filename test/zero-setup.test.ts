@@ -109,9 +109,10 @@ describe("first launch requires no setup", () => {
     const p = await portfolio();
     const s = p.active.find((x) => x.name === "busy")!.summary;
     expect(s.recentFocus).toBe("wire the export screen to the invoice API");
-    expect(s.completed).toContain("schema migration");
-    expect(s.unfinished).toContain("wire export to the invoice API");
-    expect(s.suggestedNextAction).toContain("Resume");
+    expect(s.completed).toContain("add invoice export");
+    expect(s.unfinished).toBe("1 uncommitted file(s)");
+    expect(s.suggestedNextAction).toBe("Review and commit the uncommitted work");
+    expect(s.evidence.some((e) => e.kind === "ezcoder-task")).toBe(false);
   });
 
   it("shows the evidence behind the summary without demanding approval", async () => {
@@ -126,7 +127,7 @@ describe("first launch requires no setup", () => {
     const p = await portfolio();
     const busyProject = p.active.find((x) => x.name === "busy")!;
     const codes = busyProject.relevance.reasons.map((r) => r.code);
-    expect(codes).toContain("running-worker");
+    expect(codes).not.toContain("running-worker");
     expect(codes).toContain("recent-session");
     expect(busyProject.relevance.score).toBeGreaterThan(0);
   });
@@ -149,14 +150,44 @@ describe("first launch requires no setup", () => {
     expect(b.generatedAt).toBe(a.generatedAt);
   });
 
-  it("regenerates the summary when the underlying evidence changes", async () => {
+  it("does not regenerate when ignored EZ Coder tasks change", async () => {
     const before = (await portfolio()).active.find((x) => x.name === "busy")!.summary;
     writeJson(path.join(paths.ezcoder.taskProjects, "busy", "tasks.json"), [
       { id: "t1", title: "wire export to the invoice API", status: "blocked", updatedAt: iso(1) },
     ]);
     const after = (await portfolio()).active.find((x) => x.name === "busy")!.summary;
-    expect(after.unfinished).toMatch(/blocked/i);
-    expect(after.generatedAt).not.toBe(before.generatedAt);
+    expect(after).toEqual(before);
+  });
+});
+
+describe("chosen summary persistence", () => {
+  it("keeps acknowledged choices through evidence refresh and server restart with isolated sources", async () => {
+    const root = tempDir('pcc-chosen-');
+    const sources = sourcePaths(path.join(root, 'home'), path.join(root, 'app'));
+    const dir = path.join(sources.home, 'code', 'chosen');
+    writeText(path.join(dir, 'README.md'), '# Synthetic chosen');
+    writeJson(path.join(sources.ezcoder.taskProjects, 'chosen', 'meta.json'), { path: dir, name: 'Synthetic chosen' });
+    const taskFile = path.join(sources.ezcoder.taskProjects, 'chosen', 'tasks.json');
+    writeJson(taskFile, [{ id: 't', title: 'ordinary work', status: 'in-progress' }]);
+    let server = await buildServer(sources);
+    try {
+      const initial = (await server.inject('/api/portfolio')).json<Portfolio>();
+      let p = initial.other[0]!;
+      await server.inject({ method: 'POST', url: `/api/projects/${p.id}/override`, payload: { pinned: true } });
+      p = (await server.inject('/api/portfolio')).json<Portfolio>().active.find((x) => x.id === p.id)!;
+      const saved = (await server.inject({ method: 'POST', url: `/api/projects/${p.id}/summary`, payload: { suggestedNextAction: 'Prepare one bounded acceptance case' } })).json().summary;
+      expect(saved.nextActionEditedAt).toBeTruthy();
+      expect(saved.generatedAt).toBe(p.summary.generatedAt);
+      writeJson(taskFile, [{ id: 't', title: 'changed source evidence', status: 'done' }]);
+      const refreshed = (await server.inject({ method: 'POST', url: '/api/refresh' })).json<Portfolio>();
+      expect(refreshed.active.find((x) => x.id === p.id)?.summary).toEqual(saved);
+      expect(refreshed.inbox).toEqual([]);
+      await server.close();
+      server = await buildServer(sources);
+      const reopened = (await server.inject({ method: 'POST', url: '/api/refresh' })).json<Portfolio>();
+      expect(reopened.active.find((x) => x.id === p.id)?.summary).toEqual(saved);
+      expect(reopened.active.find((x) => x.id === p.id)?.override.pinned).toBe(true);
+    } finally { await server.close(); }
   });
 });
 
@@ -164,12 +195,18 @@ describe("fifty-project coverage", () => {
   it("bounds deep scans, reports over-cap requests, hidden/missing projects and failed reads honestly", async () => {
     const fixture = tempDir("pcc-scale-");
     const sources = sourcePaths(path.join(fixture, "home"), path.join(fixture, "app"));
+    const links = [];
+    const tasks = [];
     for (let n = 0; n < 50; n++) {
       const dir = path.join(sources.home, "code", `p${String(n).padStart(2, "0")}`);
       if (n !== 49) writeText(path.join(dir, "README.md"), "# Synthetic\nFixture context");
       writeJson(path.join(sources.ezcoder.taskProjects, String(n), "meta.json"), { path: dir, name: `p${n}` });
-      writeJson(path.join(sources.ezcoder.taskProjects, String(n), "tasks.json"), [{ id: "t", title: n < 20 ? "needs your approval" : "ordinary task", status: "pending" }]);
+      writeJson(path.join(sources.ezcoder.taskProjects, String(n), "tasks.json"), [{ id: "ignored", title: "not imported", status: "pending" }]);
+      links.push({ name: `p${n}`, cwd: dir });
+      tasks.push({ project: `p${n}`, id: `t${n}`, title: n < 20 ? "needs your approval" : "ordinary task", status: "pending" });
     }
+    writeJson(sources.ezboss.links, { projects: links });
+    writeJson(sources.ezboss.plan, { tasks });
     const server = await buildServer(sources);
     try {
       const first = (await server.inject({ method: "POST", url: "/api/refresh" })).json<Portfolio>();
@@ -179,7 +216,7 @@ describe("fifty-project coverage", () => {
       expect(first.other.every((p) => p.scanStatus !== "checked")).toBe(true);
       const hidden = first.active[0]!;
       await server.inject({ method: "POST", url: `/api/projects/${hidden.id}/override`, payload: { hidden: true } });
-      writeText(path.join(sources.ezcoder.taskProjects, "1", "tasks.json"), "{broken");
+      writeText(sources.ezboss.plan, "{broken");
       const failed = (await server.inject({ method: "POST", url: "/api/refresh" })).json<Portfolio>();
       expect(failed.hidden.map((p) => p.id)).toContain(hidden.id);
       expect(failed.coverage!.unavailable).toBeGreaterThan(0);

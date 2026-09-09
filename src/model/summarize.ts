@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { retainedTasks, SUMMARY_POLICY } from "./task-policy.ts";
 import type { SessionSummary } from "../adapters/session-summary.ts";
 import type {
   AgentTask,
@@ -23,16 +24,16 @@ export type SummaryInput = {
  */
 export function summaryFingerprint(input: SummaryInput): string {
   const h = crypto.createHash("sha256");
-  h.update("attention-v4:historical-session-outcomes");
+  h.update(SUMMARY_POLICY);
   h.update(input.activity.lastCommitAt ?? "");
   h.update(input.activity.lastCommitSubject ?? "");
   h.update(String(input.activity.dirtyFileCount ?? ""));
   h.update(input.activity.lastAgentSessionAt ?? "");
   h.update(String(input.activity.sessionCount));
-  for (const t of input.tasks) h.update(JSON.stringify([t.id, t.status, t.title, t.summary, t.updatedAt]));
+  for (const t of retainedTasks(input.tasks)) h.update(JSON.stringify([t.id, t.status, t.title, t.summary, t.updatedAt]));
   for (const s of input.sessions) h.update(`${s.file}:${s.request ?? ""}:${s.failed}`);
   for (const d of input.docs) h.update(`${d.path}:${d.text.length}`);
-  return h.digest("hex");
+  return SUMMARY_POLICY + h.digest("hex");
 }
 
 function trim(s: string, max = 180): string {
@@ -52,7 +53,8 @@ export function summarize(input: SummaryInput): ProjectSummary {
     evidence.push({ kind, path, detail: trim(detail, 200), observedAt: at });
   };
 
-  const { activity, tasks, sessions } = input;
+  const { activity, sessions } = input;
+  const tasks = retainedTasks(input.tasks);
   const newestSession = sessions.find((s) => s.request);
 
   // 1. What was most recently being worked on.
@@ -63,7 +65,7 @@ export function summarize(input: SummaryInput): ProjectSummary {
     cite("session", `opening request: ${newestSession.request}`, newestSession.file);
   } else if (running[0]) {
     recentFocus = trim(running[0].title);
-    cite("ezcoder-task", `task in progress: ${running[0].title}`);
+    cite("ezboss-task", `task in progress: ${running[0].title}`);
   } else if (activity.lastCommitSubject) {
     recentFocus = trim(activity.lastCommitSubject);
     cite("git", `most recent commit: ${activity.lastCommitSubject}`);
@@ -78,7 +80,7 @@ export function summarize(input: SummaryInput): ProjectSummary {
       done.length === 1
         ? trim(newest.title)
         : `${done.length} tasks finished, most recently: ${trim(newest.title, 120)}`;
-    cite("ezcoder-task", `${done.length} task(s) marked done; latest "${newest.title}"`);
+    cite("ezboss-task", `${done.length} task(s) marked done; latest "${newest.title}"`);
   } else if (activity.recentCommitSubjects.length > 0) {
     completed = `Committed: ${trim(activity.recentCommitSubjects.slice(0, 3).join("; "), 160)}`;
     cite("git", `recent commits: ${activity.recentCommitSubjects.slice(0, 3).join(" | ")}`);
@@ -93,7 +95,7 @@ export function summarize(input: SummaryInput): ProjectSummary {
         ? `blocked: ${trim(blocked[0]!.title, 120)}`
         : `${blocked.length} blocked tasks`,
     );
-    cite("ezcoder-task", `blocked task(s): ${blocked.map((t) => t.title).slice(0, 3).join(" | ")}`);
+    cite("ezboss-task", `blocked task(s): ${blocked.map((t) => t.title).slice(0, 3).join(" | ")}`);
   }
   if (running.length > 0) {
     unfinishedParts.push(
@@ -101,12 +103,12 @@ export function summarize(input: SummaryInput): ProjectSummary {
         ? `in progress: ${trim(running[0]!.title, 120)}`
         : `${running.length} tasks still in progress`,
     );
-    cite("ezcoder-task", `in-progress task(s): ${running.map((t) => t.title).slice(0, 3).join(" | ")}`);
+    cite("ezboss-task", `in-progress task(s): ${running.map((t) => t.title).slice(0, 3).join(" | ")}`);
   }
   const pending = tasks.filter((t) => t.status === "pending");
   if (pending.length > 0) {
     unfinishedParts.push(`${pending.length} pending`);
-    cite("ezcoder-task", `pending task(s): ${pending.map((t) => t.title).slice(0, 3).join(" | ")}`);
+    cite("ezboss-task", `pending task(s): ${pending.map((t) => t.title).slice(0, 3).join(" | ")}`);
   }
   if (activity.dirty) {
     unfinishedParts.push(

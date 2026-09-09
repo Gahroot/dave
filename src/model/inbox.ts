@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { retainedTasks } from "./task-policy.ts";
 import type { AttentionCandidate, PortfolioProject } from "../shared/types.ts";
 import type { SessionSummary } from "../adapters/session-summary.ts";
 import type { Repo } from "../db/repo.ts";
@@ -14,7 +15,7 @@ export type InboxInput = {
 export function attentionCandidates(inputs: InboxInput[]): AttentionCandidate[] {
   return inputs.flatMap(({ project: p }) => {
     if (p.override.hidden || !p.exists) return [];
-    return p.tasks.flatMap((t) => {
+    return retainedTasks(p.tasks).flatMap((t) => {
       const attention = classifyTask(t);
       if (!attention) return [];
       return [{

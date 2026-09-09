@@ -2,9 +2,8 @@ import type { InboxItem, PortfolioProject } from "../shared/types.ts";
 
 const DAY = 86_400_000;
 
-/** Bounded context, not an executable script or a full transcript. */
-export function handoff(project: PortfolioProject, item: InboxItem): string {
-  const clean = (value: string, limit = 600) => value
+/** Plain bounded context; never interpreted as HTML or executed. */
+export const clean = (value: string, limit = 600) => value
     .replace(/```[\s\S]*?```/g, "[code omitted]")
     .replace(/`[^`]*`/g, "[code omitted]")
     .replace(/(?:bearer\s+|(?:api[_ -]?key|password|token|secret)\s*[:=]\s*)\S+/gi, "[credential omitted]")
@@ -12,6 +11,9 @@ export function handoff(project: PortfolioProject, item: InboxItem): string {
     .replace(/https?:\/\/\S+/gi, "[URL omitted]")
     .replace(/(?:\$\s|\b(?:sudo|npm|npx|bash|sh|curl|git|rm|node|python)\s)[^\n]*/g, " [command omitted]")
     .replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, limit);
+
+/** Bounded context, not an executable script or a full transcript. */
+export function handoff(project: PortfolioProject, item: InboxItem): string {
   return ["Project handoff (context only; no execution authorized)",
     `Directory: ${clean(project.canonicalPath, 1000)}`,
     `Observed request: ${clean(item.detail)}`,
@@ -20,6 +22,20 @@ export function handoff(project: PortfolioProject, item: InboxItem): string {
     `First seen: ${item.createdAt}`,
     `Last observed: ${item.lastObservedAt ?? "unknown"}`,
     ...item.evidence.slice(0, 4).map((e) => `Source: ${e.kind}; ${clean(e.path ?? "task record", 300)}; ${clean(e.observedAt || "unknown", 50)}`),
+  ].join("\n").slice(0, 3500);
+}
+
+/** Project-only brief, independent of inbox attention state. */
+export function projectWorkBrief(project: PortfolioProject): string {
+  const s = project.summary;
+  return ["Project work brief (context only; no execution authorized)",
+    `Project: ${clean(project.name, 200)}`,
+    `Directory: ${clean(project.canonicalPath, 1000)}`,
+    `Recent context: ${clean(s.recentFocus ?? "Not provided", 400)}`,
+    `Appears completed: ${clean(s.completed ?? "Not provided", 400)}`,
+    `Unfinished or blocked: ${clean(s.unfinished ?? "Not provided", 400)}`,
+    `Chosen next action: ${clean(s.suggestedNextAction ?? "Not provided", 400)}`,
+    `Action saved: ${clean(s.nextActionEditedAt ?? "Not provided", 50)}`,
   ].join("\n").slice(0, 3500);
 }
 

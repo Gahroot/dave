@@ -88,6 +88,25 @@ describe("own storage", () => {
     expect(ctx.repo.summary(id)!.summary).toMatchObject({ recentFocus: "mine", edited: true });
   });
 
+  it("retains action provenance and legacy absence after actual close/reopen", () => {
+    const home = tempDir();
+    const db = openDb(home);
+    const repo = makeRepo(db);
+    const chosen = repo.ensureProject('/chosen', 'Chosen', AT);
+    const legacy = repo.ensureProject('/legacy', 'Legacy', AT);
+    const summary = { ...emptySummary(AT), edited: true, suggestedNextAction: 'Prepare case', nextActionEditedAt: AT };
+    repo.saveSummary(chosen, 'chosen-fp', summary);
+    repo.saveSummary(legacy, 'legacy-fp', { ...emptySummary(AT), edited: true });
+    repo.setOverride(chosen, { pinned: true, hidden: true }, AT);
+    db.close();
+    const reopened = openDb(home);
+    try {
+      expect(makeRepo(reopened).summary(chosen)).toEqual({ fingerprint: 'chosen-fp', summary });
+      expect(makeRepo(reopened).summary(legacy)?.summary.nextActionEditedAt).toBeUndefined();
+      expect(makeRepo(reopened).override(chosen)).toEqual({ pinned: true, hidden: true });
+    } finally { reopened.close(); }
+  });
+
   it("records optional pin and hide flags independently", () => {
     expect(ctx.repo.setOverride(id, { pinned: true }, AT)).toEqual({ pinned: true, hidden: false });
     expect(ctx.repo.setOverride(id, { hidden: true }, AT)).toEqual({ pinned: true, hidden: true });

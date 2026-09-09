@@ -196,7 +196,10 @@ export function repo(db: Db) {
     reconcileAttention(candidates: AttentionCandidate[], observedProjects: string[], now: string, baseline = false): void {
       this.transaction(() => {
         for (const id of observedProjects) {
-          db.prepare("UPDATE inbox_items SET active = 0 WHERE project_id = ? AND subject_key IS NOT NULL").run(id);
+          db.prepare(`UPDATE inbox_items SET active = 0 WHERE project_id = ? AND subject_key IS NOT NULL
+            AND subject_key NOT LIKE '["ezcoder%'
+            AND NOT EXISTS (SELECT 1 FROM json_each(evidence_json)
+              WHERE json_extract(value, '$.kind') = 'ezcoder-task')`).run(id);
         }
         for (const c of candidates) {
           // Only exact legacy evidence inherits an outcome, never a guessed match.

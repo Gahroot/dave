@@ -124,8 +124,10 @@ export type ProjectSummary = {
   completed: string | null;
   /** What appears unfinished or blocked. */
   unfinished: string | null;
-  /** The most likely next action. Always a suggestion. */
+  /** A suggestion until explicitly saved by the user. */
   suggestedNextAction: string | null;
+  /** Server-owned action save time; absent on generated and legacy summaries. */
+  nextActionEditedAt?: string | null;
   evidence: EvidenceRef[];
   generatedAt: string;
   /** True when the user edited this summary by hand. */

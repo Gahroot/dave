@@ -26,17 +26,15 @@ describe("normalizeStatus", () => {
 });
 
 describe("ezbossAgentState", () => {
-  it("reads ezcoder tasks and truncates prompts to a short summary", async () => {
+  it("ignores ezcoder tasks even when valid", async () => {
     const { alpha, paths } = home();
     writeJson(path.join(paths.ezcoder.taskProjects, "h1", "meta.json"), { path: alpha });
     writeJson(path.join(paths.ezcoder.taskProjects, "h1", "tasks.json"), [
       { id: "t1", title: "Fix it", prompt: "x".repeat(500), status: "in-progress", createdAt: "2026-08-01T00:00:00Z" },
     ]);
     const r = await ezbossAgentState(paths, new Map()).read();
-    const state = r.data.get(canonicalPath(alpha))!;
-    expect(state.tasks[0]).toMatchObject({ status: "in_progress", title: "Fix it" });
-    expect(state.tasks[0]!.summary!.length).toBeLessThanOrEqual(200);
-    expect(state.tasks[0]!.updatedAt).toBe("2026-08-01T00:00:00.000Z");
+    expect(r.data.has(canonicalPath(alpha))).toBe(false);
+    expect(r.issues).toEqual([]);
   });
 
   it("tolerates an absent plan.json", async () => {
@@ -74,19 +72,19 @@ describe("ezbossAgentState", () => {
     expect(Date.parse(activity.lastActivityAt!)).toBeGreaterThan(0);
   });
 
-  it("reports a non-array tasks.json but keeps going", async () => {
+  it("ignores a non-array tasks.json", async () => {
     const { alpha, paths } = home();
     writeJson(path.join(paths.ezcoder.taskProjects, "h1", "meta.json"), { path: alpha });
     writeJson(path.join(paths.ezcoder.taskProjects, "h1", "tasks.json"), { nope: true });
     const r = await ezbossAgentState(paths, new Map()).read();
-    expect(r.issues[0]!.message).toMatch(/not an array/);
+    expect(r.issues).toEqual([]);
   });
 
-  it("reports corrupt task JSON as an issue", async () => {
+  it("does not parse corrupt EZ Coder task JSON", async () => {
     const { alpha, paths } = home();
     writeJson(path.join(paths.ezcoder.taskProjects, "h1", "meta.json"), { path: alpha });
     writeText(path.join(paths.ezcoder.taskProjects, "h1", "tasks.json"), "[{");
     const r = await ezbossAgentState(paths, new Map()).read();
-    expect(r.issues).toHaveLength(1);
+    expect(r.issues).toEqual([]);
   });
 });

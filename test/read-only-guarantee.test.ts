@@ -81,7 +81,8 @@ beforeAll(() => {
   const taskDir = path.join(paths.ezcoder.taskProjects, "alpha");
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "meta.json"), JSON.stringify({ name: "alpha", path: project }));
-  fs.writeFileSync(path.join(taskDir, "tasks.json"), JSON.stringify([{ id: "approval", title: "needs your approval to publish", status: "pending" }]));
+  fs.writeFileSync(path.join(taskDir, "tasks.json"), JSON.stringify([{ id: "ignored", title: "never ingest", status: "pending" }]));
+  fs.writeFileSync(paths.ezboss.plan, JSON.stringify({ tasks: [{ project: "alpha", id: "approval", title: "needs your approval to publish", status: "pending" }] }));
   fs.writeFileSync(path.join(project, "README.md"), "# Alpha\n\nA portal.\n");
   fs.writeFileSync(path.join(project, "PLAN.md"), "## Next\n- [ ] do the thing\n");
   fs.writeFileSync(PROJECT_ENV, "PROJECT_SECRET=hunter2");

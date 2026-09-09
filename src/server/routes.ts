@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { retainedIssue } from "../model/task-policy.ts";
 import { refresh, withAttention } from "../model/refresh.ts";
 import { emptySummary } from "../shared/types.ts";
 import type { AttentionAction, ProjectSummary } from "../shared/types.ts";
@@ -54,7 +55,7 @@ export function registerRoutes(app: FastifyInstance, paths: SourcePaths, repo: R
 
   app.get("/api/portfolio", async () => current());
   app.post("/api/refresh", async () => refreshOnce());
-  app.get("/api/issues", async () => ({ issues: repo.issues() }));
+  app.get("/api/issues", async () => ({ issues: repo.issues().filter(retainedIssue) }));
   app.get("/api/health", async () => ({ ok: true, appHome: paths.appHome }));
 
   /** Optional: pin keeps a project in Active, hide removes it from both views. */
@@ -97,6 +98,9 @@ export function registerRoutes(app: FastifyInstance, paths: SourcePaths, repo: R
         return reply.code(400).send({ error: `${field} must be a string or null` });
       }
       next[field] = value === null ? null : String(value).slice(0, MAX_LEN);
+      if (field === "suggestedNextAction") {
+        next.nextActionEditedAt = next[field]?.trim() ? clock().toISOString() : null;
+      }
       changed = true;
     }
     if (!changed) return reply.code(400).send({ error: "no editable fields supplied" });
