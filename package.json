@@ -22,7 +22,7 @@
     "@prestyj/ai": "5.17.0",
     "@tabler/icons-react": "^3.31.0",
     "fastify": "^5.2.1",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^5.4.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
