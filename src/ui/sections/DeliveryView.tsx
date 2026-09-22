@@ -8,6 +8,9 @@ import { deliveryAssignment } from "../delivery-handoff.ts";
 import { deliveryApi, DeliveryRequestError } from "../delivery-api.ts";
 import { CopyText } from "../components/CopyText.tsx";
 import { DeliveryCoordination } from "./DeliveryCoordination.tsx";
+import { DeliverySetup } from "./DeliverySetup.tsx";
+import { useDraftGuard } from "../hooks/useDraftGuard.ts";
+import { parseRoute, routeLink } from "../navigation.ts";
 import type { CoordinationState } from "../../model/delivery-coordination.ts";
 
 type Result = { coordination?: CoordinationState; state?: DeliveryState; operation?: GenerationOperation | null; recovery?: string | null };
@@ -39,26 +42,29 @@ export function DeliveryView({ project, today = false }: { project: PortfolioPro
   const [reason, setReason] = useState("");
   const completion = useRef<{ id: string; revision: number; key: string; report: { outcome: string; evidence: string } } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const draftDestination = useRef(parseRoute(location.hash).destination);
+  useDraftGuard(dirty || contextDirty || !!outcome || !!evidence || !!reason, hash => { const route = parseRoute(hash); const returning = route.destination === "connections" && route.returnTo ? parseRoute(route.returnTo) : null; return route.destination === draftDestination.current && (route.destination === "projects" && route.id === project.id || route.destination === "queue" && route.delivery === project.id) || draftDestination.current === "projects" && returning?.destination === "projects" && returning.id === project.id; });
   const accept = (result: Result) => {
     if (result.coordination) setCoordination(result.coordination);
     if (result.state) { setState(result.state); if (!initialized.current) { setGoal(result.state.goal ?? initialGoal); initialized.current = true; } }
     if (result.operation !== undefined) setOperation(result.operation);
     if (result.recovery) { setNotice(result.recovery); setPreview(null); setContextDirty(true); }
   };
-  const load = async () => {
+  const load = async (signal?: AbortSignal) => {
     try {
-      const result = await deliveryApi<Result>(base);
+      const result = await deliveryApi<Result>(base, undefined, signal);
+      if (signal?.aborted) return;
       accept(result); setError("");
       if (!result.state?.goal && !settingsTouched.current) {
-        const connected = await deliveryApi<{ openai: { state: string } }>("/api/providers");
-        if (connected.openai.state === "connected" && !settingsTouched.current) {
+        const connected = await deliveryApi<{ openai: { state: string } }>("/api/providers", undefined, signal);
+        if (!signal?.aborted && connected.openai.state === "connected" && !settingsTouched.current) {
           setGoal(current => current.provider ? current : { ...current, provider: "openai", model: "gpt-6-astra" });
         }
       }
     }
-    catch (e) { setError(e instanceof Error ? e.message : "Delivery state unavailable. Reload latest saved state."); }
+    catch (e) { if (!signal?.aborted) setError(e instanceof Error ? e.message : "Delivery state unavailable. Reload latest saved state."); }
   };
-  useEffect(() => { void load(); }, [base]);
+  useEffect(() => { const ac = new AbortController(); void load(ac.signal); return () => ac.abort(); }, [base]);
   useEffect(() => {
     if (operation?.status !== "pending") return;
     let active = true;
@@ -104,15 +110,15 @@ export function DeliveryView({ project, today = false }: { project: PortfolioPro
     });
   };
   return <Card withBorder radius="md" padding="md"><Stack gap="sm">
-    <Title order={2}>{today ? "Today's project milestone" : "Delivery plan"}</Title>
-    <Group justify="space-between"><Text fw={600}>{project.name}</Text><Button component="a" variant="default" href={today ? `#projects?id=${encodeURIComponent(project.id)}` : "#connections"}>{today ? "Project details and setup" : "Connections"}</Button></Group>
+    <Title order={2}>{today ? project.name : "Delivery plan"}</Title>
+    {today && <Button component="a" variant="default" href={routeLink("projects", { id: project.id, tab: "delivery" })}>Project details and setup</Button>}
     {error && <Alert color="red" title="Action needs attention" role="alert">{error}</Alert>}
     <Text role="status">{notice}</Text>
     <Button variant="default" disabled={busy} onClick={() => void load()}>Reload latest saved state</Button>
     {!state && <Text>Loading saved delivery state. If it stays unavailable, use Reload latest saved state.</Text>}
     {state && <>
       {coordination && <DeliveryCoordination project={project} state={state} coordination={coordination} onSaved={accept} today={today} disabled={busy || pending} />}
-      {!coordination?.contract && <details><summary>Legacy milestone queue and reports</summary>
+      {!coordination?.contract && <details><summary>Older milestone queue, from before finish lines</summary>
       <Title order={3} ref={heading} tabIndex={-1}>{milestone?.title ?? (exhausted ? "Saved milestone queue exhausted" : plan ? "No eligible milestone: review prerequisites" : "No delivery milestone yet")}</Title>
       {milestone ? <>
         <Text size="lg">{milestone.outcome}</Text><Text>Status: {milestone.status}</Text><Text><strong>Why now:</strong> {milestone.whyNow}</Text>
@@ -139,16 +145,14 @@ export function DeliveryView({ project, today = false }: { project: PortfolioPro
       </details>}
       {operation && (pending || !coordination?.contract) && <Text role="status">Planning: {operation.status}{operation.error ? ` · ${operation.error}. Review a fresh preview and retry explicitly.` : ""}</Text>}
       {pending && <Button variant="default" disabled={busy} onClick={() => void run("cancel", { operationId: operation!.id })}>Cancel planning</Button>}
-      {!today && <>
-        <details open={!state.goal}><summary>Delivery goal and planning setup</summary><Stack gap="sm" mt="sm" data-summary-editing={dirty || undefined}>
-          <Text>Saving settings invalidates prior context approval. Form drafts stay here on errors or conflicts.</Text>
-          {([['goal', 'Delivery goal'], ['intendedUser', 'Intended user'], ['workflow', 'Target daily workflow'], ['stage', 'Current stage and unknowns']] as const).map(([key, label]) => <TextInput key={key} label={label} value={goal[key]} maxLength={key === 'goal' || key === 'workflow' ? 4000 : 1000} disabled={busy || pending} onChange={e => updateGoal({ [key]: e.currentTarget.value })} />)}
-          <NativeSelect label="Planning provider" value={goal.provider ?? ""} disabled={busy || pending} onChange={e => updateGoal({ provider: (e.currentTarget.value || null) as DeliveryGoal['provider'], model: null })} data={[{ value: "", label: "Local coordination (no provider required)" }, { value: "openai", label: "OpenAI subscription" }, ...(goal.provider === "claude" ? [{ value: "claude", label: "Saved Claude selection (planning unsupported)" }] : [])]} />
-          <NativeSelect label="Exact planning model" value={goal.model ?? ""} disabled={busy || pending} onChange={e => updateGoal({ model: e.currentTarget.value || null })} data={[{ value: "", label: "Select model" }, ...(goal.provider === "openai" ? ["gpt-6-astra"] : goal.provider === "claude" ? ["claude-fable-5-1", "claude-opus-5"] : [])]} />
+      {!today && <DeliverySetup manualOnly={!state.goal?.provider} hasGoal={!!state.goal && !dirty} hasPlan={!!plan || !!coordination?.contract} canReview={!!preview || !!state.goal?.consent} goal={<Stack gap="sm" data-summary-editing={dirty || undefined}>
+          {([['goal', 'What are you trying to build'], ['intendedUser', 'Who uses it'], ['workflow', 'What they do with it day to day'], ['stage', 'Where it is now, and what you are unsure about']] as const).map(([key, label]) => <TextInput key={key} label={label} value={goal[key]} maxLength={key === 'goal' || key === 'workflow' ? 4000 : 1000} disabled={busy || pending} onChange={e => updateGoal({ [key]: e.currentTarget.value })} />)}
+          <NativeSelect label="Who breaks the work into pieces" value={goal.provider ?? ""} disabled={busy || pending} onChange={e => updateGoal({ provider: (e.currentTarget.value || null) as DeliveryGoal['provider'], model: null })} data={[{ value: "", label: "My own coding tool (nothing sent anywhere)" }, { value: "openai", label: "OpenAI subscription" }, ...(goal.provider === "claude" ? [{ value: "claude", label: "Saved Claude selection (planning unsupported)" }] : [])]} />
+          <NativeSelect label="Which model" value={goal.model ?? ""} disabled={busy || pending} onChange={e => updateGoal({ model: e.currentTarget.value || null })} data={[{ value: "", label: "Select model" }, ...(goal.provider === "openai" ? ["gpt-6-astra"] : goal.provider === "claude" ? ["claude-fable-5-1", "claude-opus-5"] : [])]} />
+          <Button component="a" variant="default" href={routeLink("connections", { return: location.hash })}>Set up or repair provider connection</Button>
           {goal.provider === "claude" && <Text>Claude planning unavailable: subscription-compatible isolation from managed hooks has not been verified. No API fallback. See Connections.</Text>}
-          <Button disabled={busy || pending || !goal.goal.trim() || !goal.intendedUser.trim() || !goal.workflow.trim() || !goal.stage.trim() || (!!goal.provider && !goal.model)} onClick={() => void run("goal", { goal: { ...goal, consent: null } }, () => { setDirty(false); setPreview(null); setNotice("Goal saved. Define a finish line or choose optional model planning."); })}>Save delivery settings</Button>
-        </Stack></details>
-        <details><summary>Optional model planning: context and external-send approval</summary><Stack gap="sm" mt="sm">
+          <Button disabled={busy || pending || !goal.goal.trim() || !goal.intendedUser.trim() || !goal.workflow.trim() || !goal.stage.trim() || (!!goal.provider && !goal.model)} onClick={() => void run("goal", { goal: { ...goal, consent: null } }, () => { setDirty(false); setPreview(null); setNotice("Saved. Next, say what finished looks like."); })}>Save delivery settings</Button>
+        </Stack>} context={<Stack gap="sm">
           <Text>Select bounded local context. Preview reads selected files locally, not externally. Review for private information before approving. No task lists, credentials, raw transcripts, client data or bulk source export.</Text>
           {categories.map(category => <Checkbox key={category} label={category === "goal" ? "Goal (required)" : category} checked={selection.includes(category)} disabled={category === "goal" || busy || pending} onChange={e => { const checked = e.currentTarget.checked; setSelection(s => checked ? [...s, category] : s.filter(c => c !== category)); setPreview(null); setContextDirty(true); }} />)}
           {selection.includes("documents") && documents.map(doc => <Checkbox key={doc} label={doc} checked={docs.includes(doc)} disabled={busy || pending} onChange={e => { const checked = e.currentTarget.checked; setDocs(s => checked ? [...s, doc] : s.filter(d => d !== doc)); setPreview(null); setContextDirty(true); }} />)}
@@ -172,12 +176,13 @@ export function DeliveryView({ project, today = false }: { project: PortfolioPro
           }}>Collect local preview</Button>
           {dirty && <Text>Save your changed delivery settings before previewing.</Text>}
           {project.override.hidden && <Text>Unhide this project in its notes options before planning.</Text>}
+          {!state.goal?.provider && <Text>Using another coding tool does not require external planning. Use the finish line and handoff controls above.</Text>}
+        </Stack>} review={<Stack gap="sm">
+          <Text>Selected provider: {state.goal?.provider ?? "None"} / {state.goal?.model ?? "No model"}. Generation sends only the approved packet and may use your paid account.</Text>
           {preview && <><Text fw={600}>External destination: {preview.packet.provider} / {preview.packet.model}</Text><Textarea label="Exact context packet for approval" readOnly value={JSON.stringify(preview.packet, null, 2)} autosize minRows={6} maxRows={18} /><Button disabled={busy || pending || dirty || preview.expectedRevision !== state.revision} onClick={() => void run("context/approve", { fingerprint: preview.packet.fingerprint }, () => { setContextDirty(false); setNotice("Exact context approved. Generate or Replan sends it to the selected provider."); })}>Approve this exact packet for external planning</Button></>}
           <Text>Approval: {contextDirty ? "Fresh preview and approval required for your selection or changed context." : state.goal?.consent ? "Saved for the exact packet and model. Changes require a new preview." : "Not approved"}</Text>
           <Group><Button disabled={busy || pending || dirty || contextDirty || !state.goal?.consent || state.goal.provider !== "openai"} onClick={() => void run("generate")}>{plan && !milestone ? "Generate next plan / retry" : "Generate plan"}</Button>{plan && <Button variant="default" disabled={busy || pending || dirty || contextDirty || !state.goal?.consent || state.goal.provider !== "openai"} onClick={() => void run("replan")}>Replan explicitly</Button>}</Group>
-          <Button component="a" variant="default" href="#connections">Set up or repair provider connection</Button>
-        </Stack></details>
-      </>}
+        </Stack>} /> }
     </>}
   </Stack></Card>;
 }

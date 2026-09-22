@@ -10,11 +10,13 @@ import { registerRoutes } from "./routes.ts";
 import { providerService, type ProviderService } from "../providers/index.ts";
 import { registerProviderRoutes } from "./provider-routes.ts";
 import { registerDeliveryRoutes } from "./delivery-routes.ts";
+import { registerAgentRoutes } from "./agent-routes.ts";
+import type { AgentOptions } from "../agents/service.ts";
 import { localBrowserOrigins, registerRequestGuard } from "./request-guard.ts";
 
 const DIST = fileURLToPath(new URL("../../dist", import.meta.url));
 
-export async function buildServer(paths = sourcePaths(), options: { browserOrigins?: string[]; providers?: ProviderService } = {}) {
+export async function buildServer(paths = sourcePaths(), options: { browserOrigins?: string[]; providers?: ProviderService; agentOptions?: AgentOptions } = {}) {
   const app = Fastify({ logger: false });
   registerRequestGuard(app, options.browserOrigins ?? localBrowserOrigins(Number(process.env.PORT ?? 4317)));
   const db = openDb(paths.appHome);
@@ -24,6 +26,8 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
   app.addHook("onClose", async () => { providers.close(); });
   registerProviderRoutes(app, providers);
   registerDeliveryRoutes(app, db, providers.inference);
+  try { registerAgentRoutes(app, db, paths.appHome, options.agentOptions); }
+  catch(e) { await app.close(); throw e; }
   const repo = makeRepo(db);
   registerRoutes(app, paths, repo);
 
@@ -45,4 +49,8 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
   const app = await buildServer(sourcePaths(), { browserOrigins: [...localBrowserOrigins(port), ...extraOrigins] });
   await app.listen({ port, host: "127.0.0.1" });
   console.log(`Portfolio Command Center → http://127.0.0.1:${port}`);
+  let stopping = false;
+  const shutdown = () => { if (!stopping) { stopping = true; void app.close().catch(() => { process.exitCode = 1; }); } };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 }

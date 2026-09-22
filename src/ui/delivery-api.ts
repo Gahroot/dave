@@ -7,7 +7,7 @@ export class DeliveryRequestError extends Error {
 }
 let csrf: Promise<string> | undefined;
 /** New guarded namespaces only. Never replay a mutation automatically. */
-export async function deliveryApi<T>(url: string, body?: unknown): Promise<T> {
+export async function deliveryApi<T>(url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) {
     csrf ??= fetch("/api/security/csrf", { mode: "same-origin", credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(15000) })
@@ -16,11 +16,11 @@ export async function deliveryApi<T>(url: string, body?: unknown): Promise<T> {
     headers["x-dave-csrf"] = await csrf;
     headers["content-type"] = "application/json";
   }
-  const response = await fetch(url, { method: body === undefined ? "GET" : "POST", mode: "same-origin", credentials: "same-origin", cache: "no-store", headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30000) });
+  const response = await fetch(url, { method: body === undefined ? "GET" : "POST", mode: "same-origin", credentials: "same-origin", cache: "no-store", headers, body: body === undefined ? undefined : JSON.stringify(body), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000) });
   const result = await response.json();
   if (!response.ok) {
     if (response.status === 403) csrf = undefined;
-    throw new DeliveryRequestError(`${result.message ?? result.error ?? "Request failed"}. ${response.status === 409 ? "Reload latest saved state; your draft is retained. Review it before retrying." : "Your draft is retained. Check Connections or retry when ready."}`, response.status, result.state);
+    throw new DeliveryRequestError(`${result.message ?? result.error ?? "Request failed"}. ${response.status === 409 ? "Reload latest saved state; your draft is retained. Review it before retrying." : url.startsWith("/api/agents") ? "Your draft is retained. Review the run or retry when ready." : "Your draft is retained. Check Connections or retry when ready."}`, response.status, result.state);
   }
   return result as T;
 }

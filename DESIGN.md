@@ -1,155 +1,95 @@
-# Decision queue design and evidence
+# DAVE workbench design
 
-## Coordination workflow (9 September 2026)
+## Design read and direction
 
-**Design read:** same local single-operator app, now with a finite delivery job:
-identify the next eligible capability, transfer it, review returned evidence, and
-stop at the agreed gate. Reuse Mantine typography, shared rail/cards, native
-summary/details, labelled text fields/selects and CopyText fallback. No new visual
-system, dependencies, icons or decorative metrics. Today stays compact; scope,
-planning and full history live in project details or disclosures.
+DAVE is a local, single-operator, data-dense application workspace. Developer-tool evidence inspection is secondary. Frequent short visits should follow one loop: **see attention → open work → act with context → review → return to the queue**. Errors can trigger paid execution or lose review context, so exact approval, provenance, recovery and drafts matter more than reducing click counts.
 
-**Evidence/thesis:** local DeliveryView and ProjectCard are the primary visual
-references. MCPJam's actionable-findings task prompt and elizaOS's structured
-completion/independent review inspired the exchange, not the visual styling.
-Outcome and next action lead; setup and all-history tools are secondary. Reports
-are explicitly labelled claims; accepting them is a separate human action.
+A calm workbench with a clear next action: project/work identity, reason and safe next action first; freshness, evidence and history second. A shared next-action row is the distinguishing device. No invented metrics, progress percentages, users or dates. No marketing hero, glass, decorative cards, tint-on-tint statuses, emoji or hover lift.
 
-**Observed:** the legacy delivery walkthrough and new coordination walkthrough pass
-in Chromium 148.0.7778.96 with keyboard activation, labelled review/import forms,
-clipboard denial, stale-state preservation, a lost response after actual database
-save, exact retry, three accepted capabilities, prerequisite resolution, finite
-finish, restart/reload persistence and chosen Today focus. No provider POST occurs
-in the new flow. Desktop and 320px/200% root-text captures were inspected. The
-first pass showed stale model-success/setup messaging during local coordination;
-removed that misleading status and clarified the saved-goal next action, rebuilt,
-and reran both flows. Existing long-label wrapping and text/control roles are
-retained; no horizontal overflow occurred in the tested completion view.
+## Evidence
 
-The actual chosen project was also rendered in Today with its saved four-capability
-pilot, zero accepted criteria, unresolved live prerequisites and a prepared first
-assignment. That screenshot is private and ignored, not synthetic product proof.
+The approved Refero research inspected these references. They inform structure, not copied branding or claims of effectiveness:
 
-**Limits:** reuse is not an accessibility certificate. Screen-reader output,
-exhaustive Tab order/target-spacing and all-state contrast, true browser zoom,
-non-Chromium browsers, field performance and actual operator time savings remain
-unverified. Existing theme contrast samples apply only to those measured roles.
-No WCAG/ADA conformance, independently verified project completion or live pilot
-acceptance is claimed. Generated screenshots stay under `.ezcoder/screenshots/`.
+- [Linear inbox flow 6682](https://refero.design/flows/6682), [screen](https://refero.design/pages/42256ca3-3d3b-452b-b445-a908e916d9fc): scan, select beside queue, act without losing position.
+- [Linear project updates 6673](https://refero.design/flows/6673), [screen](https://refero.design/pages/f45f744c-7330-4dc1-b291-676f4dc17637): comparable rows, persistent context, contextual editing.
+- [Linear project creation 6655](https://refero.design/flows/6655): bounded setup with essential fields before optional configuration. DAVE discovers projects; no project creation is added.
+- [GitHub review](https://refero.design/pages/4b64c360-ee73-4c4e-91e2-1c7a9b923f8b): separate evidence navigation and final review. DAVE does not become an IDE or add merge/publish.
+- Contrast: [review before confirm](https://refero.design/pages/48aaa05c-0d69-492e-9964-bc876505e2b3), named stages only for bounded setup, not ordinary navigation.
 
-## Historical Step 12 synthetic browser evidence (8 September 2026)
+Source inspection found three separate home queues, setup above project context, long delivery/review stacks and equal-weight actions. Baseline synthetic screenshots: `.ezcoder/screenshots/redesign-baseline-1440.png` and `redesign-baseline-390.png`. These are runtime captures, not usability research.
 
-Added `test/delivery-ui-fixture.ts` and `test/delivery-ui-walkthrough.mjs`. Fixture uses separate temporary source home and appHome, port 4320, an injected ProviderService/auth owner and delayed fake inference returning three whole capabilities. No real authentication, Keychain, provider inference, external client data, live server or live database was used. The older fixture now uses the retained EZBoss legacy attention input instead of forbidden EZ Coder tasks. Its walkthrough follows the new Home project-details link and copies notes from project details, preserving the same editing, failure/retry, focus, polling and clipboard assertions. Both browser walkthroughs passed in the parent run; these expectation changes implement the approved separation of notes from milestones, not suppressed failures.
+## Information architecture
 
-Production contract read: `/Applications/EZ Coder.app/Contents/Resources/sidecar/skills/evidence-led-ui/references/production-contract.md`. Scope here is native Connections and delivery goal/context/task/completion/history in Chromium 148.0.7778.96. This is partial changed-scope evidence, not WCAG/ADA conformance or overall step completion.
+Primary navigation: Inbox, Projects, Agent desk. Secondary: Connections, Diagnostics.
 
-| Changed scope | Runtime evidence / remaining gaps |
-|---|---|
-| Connections/privacy | Fake connected → disconnected → sign-in pending → success; Claude unavailable; provider response sentinel absent. Real login/expired credentials/account entitlement and exhaustive browser-storage inspection unverified. |
-| Goal and exact approval | Connected default OpenAI/gpt-6-astra; explicit Claude choice survives reload; 503 and 409 preserve drafts; Generate disabled before approval; approved fingerprint equals displayed packet. |
-| Generation | Whole onboarding, staff review and operational recovery; three pending operation GET reads, no automatic POST. |
-| Task copy | Exact preview equals successful clipboard text and denied-clipboard selectable fallback; production shared deliveryAssignment reused unchanged. |
-| Completion/history | Response lost after actual fixture save; original retry body/key unchanged; two submissions produce one saved completion. Next heading receives focus; reload retains current; block and reopen preserve history. |
-| Keyboard | Native controls activated by focus + Enter, fields typed by keyboard; visible solid 2px focus on copy. Some selects/fills use Playwright helpers; exhaustive Tab order, focus obscuration and assistive-technology output unverified. |
-| Reflow/motion | Long descriptions and open disclosures: desktop, 320px, 320px with 200% root text; no document horizontal overflow. Reduced motion, dark theme and forced colors exercised. Parent inspected desktop/dark and enlarged narrow captures, reduced narrow shared-rail/card gutters to 12px to avoid unnecessary word splitting, rebuilt and reran the browser flow successfully. Actual browser zoom, localization/text-spacing and touch remain unverified. |
-| Contrast | Sampled copy-control text 15.43:1 in light and 13.58:1 in dark theme. Other states and meaningful borders/focus contrast are not exhaustively measured; no whole-app contrast claim. |
-| Performance/support | Chromium only; field CWV, Safari/Firefox and representative screen reader unverified. No project accessibility scanner configured/added. |
+- Inbox: one typed list with All, Needs decision, Ready to work and Waiting filters. Requests and delivery open alongside it; agent items open the run workspace with a safe return destination. Partial source failure preserves other results; counts say loaded when capped.
+- Projects: compact searchable/filterable directory beside a project workspace. Overview contains notes and next action, Delivery contains active work then setup, Context contains evidence and technical details. Keep hidden/pinned/waiting controls and reversible hiding.
+- Delivery setup: Goal → Context → Review and plan. Existing plans open current work. Preview is local; exact approval precedes any explicit external generation.
+- Coordination: next-action row, milestone sequence and focused active-stage panel. Connected and manual methods are distinct. Manual exchange remains exact JSON, then inspect, save, review, explicitly accept.
+- Agent desk: runs first; secondary runtime settings. Assignment → Checks and dependencies → Review and start. Check executable and argument arrays remain separate. Run workspaces expose permissions, Activity, Changes, Checks and gated review.
+- Connections: state-specific connect/restore/cancel/disconnect and storage consequences. Unsupported Claude stays unavailable. Diagnostics separates source failures from work blockers.
 
-Verification: `npx vitest run test/delivery-*.test.ts test/provider-*.test.ts` **83 passing / 7 files**; `npm test` **277 passing / 28 files**; standalone `npm run typecheck` and separate `npm run build` passed. Build preceded browser serving dist. `node test/delivery-ui-walkthrough.mjs` passed; evidence `.ezcoder/screenshots/step12/results.json`, command logs `.ezcoder/screenshots/step12-{focused,tests,typecheck,build,browser}.log`. Final screenshots under `.ezcoder/screenshots/step12/`: `connections-connected.png`, `connections-pending.png`, `context-preview.png`, `delivery-desktop.png`, `delivery-320-100.png`, `delivery-320-200.png`, `delivery-reduced-motion.png`, `completion-next-focus.png`, `history.png`. `failure.png`/`failure.txt` are retained earlier harness-failure evidence, not final success captures. Narrow and blocked-history captures inspected: readable wrapping, native controls and explicit blocked prerequisite; parent inspected final desktop/dark/full-page and enlarged narrow viewport captures and reran after improving gutters. No functional UI fix was required for the verified flow; harness corrections used configured isolated origin and asserted retained blocked current milestone rather than expecting it removed.
+Hash navigation remains dependency-free. Legacy queue/item/delivery, projects/id/q/waiting, agents/id/project/handoff and issues/connections links survive. URL values are validated identifiers, filters and tabs only; no private prompts, results or tokens. Invalid selection shows recovery, never another item. Back/Forward and meaningful return focus are required.
 
-## Native delivery UI (step 11, 8 September 2026)
+## System and component map
 
-Design read and reuse: inspected the existing MantineProvider theme, App shared Container rail, ProjectsView, ProjectCard four-question editor, CopyText fallback, and existing focus/reduced-motion CSS. Reused bordered md Cards, Stack/Group, native details/summary, labelled Mantine native selects, text inputs and textareas. Parent-provided corpus evidence: evroon/bracket commit 155010777739585ae0fb54e8cd42c1ff44d339d1, frontend/src/components/brackets/brackets.tsx:1–90, asynchronous Button mutation and loading-versus-empty states. No new dependencies, icons, palette or visual system.
+User authorized migration from the actual React 18/Mantine 7/Tabler baseline to React 19/Mantine 8/Inter/Lucide. No other UI library is needed. Font files are self-hosted through the installed package; no external font requests.
 
-Home now leads with Today's project milestone for a visible pinned project, falling back to the current active project. The outcome leads; scope, prerequisites, next milestones and history use disclosures. Saved narrow notes never become a generated milestone. Project detail retains its four-question editor under Project notes and context, with a separately labelled context-only copy. One deliveryAssignment string powers both exact task preview and CopyText, including fixed no-live-client/production/deployment/spending/commit constraints.
+Semantic roles: neutral light canvas, white working surfaces, dark ink, readable secondary ink, structural borders and restrained blue actions/focus. Spacing follows 4/8px; controls 32/40px desktop and 44px touch, radius 6–8px. Supporting text 14px, fields/body 16px. A 224px rail and one shared header/content gutter establish alignment. Data can fill the rail; prose and forms have a deliberate readable measure.
 
-Flow: save goal/user/workflow/stage and exact model; explicitly select bounded context categories/documents; collect local-only preview; inspect exact packet/provider/model; approve; explicitly Generate or Replan. Selection/settings changes invalidate the local approval action. All new mutations bootstrap same-origin CSRF and send x-dave-csrf; legacy clients are unchanged. No mutation is automatically replayed. Pending operation polling is GET-only, pauses while hidden and resumes status reads without starting generation. Reload reads latest durable operation. Cancel is explicit. Completion retains its report and idempotency key through network retry, reports user provenance, preserves saved completion if continuation fails, and focuses the milestone heading after success. Conflicts preserve form drafts and show latest returned state; releasing an old completion retry is a separate deliberate action. Queue exhaustion and blocked dependencies are distinct, never fabricated recommendations.
+- `theme.ts` and `styles.css`: type, color, spacing, control, state, focus and motion owners.
+- `WorkspaceShell`: navigation, drawer, skip link and shared content rail.
+- `WorkspacePrimitives`: page header, next-action/status rows and empty states where repeated.
+- `navigation.ts`: validated route parsing/link construction.
+- `inbox-model.ts` / `useInboxData`: typed source identity and a single owner for queue reads.
+- `ProjectWorkspace`: project tabs and scoped draft lifetime; existing `ProjectCard` notes/evidence retained.
+- `LazyDeliveryView`: load delivery only when opened. `DeliveryView` remains the API/state owner; `DeliverySetup` handles presentation. Coordination panels retain shared parent state.
+- `AgentPlatform`: lazy route/data owner; `AgentAssignment` and `AgentRunWorkspace` presentation.
+- Reuse `CopyText`, `EvidenceList`, `ProjectNextAction`, `Labels`, `StaleBadge`.
 
-Connections exposes OpenAI storage selection, connect/restore/cancel/disconnect and textual operation/error status. Session storage is an explicit selection, not fallback. Status reads do not restore credentials or make inference requests. Claude requested models remain listed with the server's isolation blocker visible; no login, API-key fallback or boundary relaxation was introduced. Account entitlement and actual authentication remain unverified.
+Rows use ordinary links/buttons; tabs use accessible tab semantics. Status has text plus optional icon, count and timestamp; color never carries meaning alone. One primary action per decision region, secondary actions quieter. Borders separate structures rather than wrapping every subsection. Feedback transitions name color/opacity and use 120–180ms with reduced-motion equivalents. Native focus-visible is separate from selection; no blur or global suppression.
 
-### Step 11 original verification plan (superseded by step 12 evidence above)
+## Safety and domain boundaries
 
-| Surface | Code/check evidence | Still required in step 12 |
+- Discovery is read-only. No external project mutation, live database migration, credential action, real execution or paid inference during verification. Agent execution is explicitly opt-in; worktrees are not security sandboxes.
+- Preserve loopback/CSRF/origin controls, authorization, request validation and separate executable/arguments. Escaped React text is the only rendering path for model/tool/source output.
+- Cached is not checked; a report is not independently verified evidence; passing checks is not human acceptance; acceptance is not commit, merge or deploy.
+- Preserve exact packet/provider/model approval, reviewed document hashes, approval invalidation, revision conflicts, request locks, operation identities and idempotent retries. No automatic mutation retry or silent model fallback.
+- Context is opt-in: bounded documents, canonical containment, regular-file/no-follow checks, secret screening, 64,000-byte packet cap. Only exact reviewed packet approval permits external generation. Regex screening cannot prove arbitrary text lacks private business data.
+- Existing context collector caps (8 product plus 4 extra documents, 64KiB per file, 4,000-character excerpts), history bounds and source-denied paths remain backend-owned and unchanged.
+- Drafts stay in project/run-scoped React owners, not browser storage. Tabs and polling do not replace drafts. Leaving dirty work requires discard/cancel; errors retain input.
+- One owner per portfolio/inbox/run/operation polling loop, explicit pause/hidden-tab behavior, bounded output and cleanup. Agent and delivery code remain lazy.
+- Request handling/dismissal records local attention decisions, not upstream task completion. Hidden projects are reversible local preferences, not deletion.
+
+## Responsive and accessibility contract
+
+Wide: navigation plus master/detail. Intermediate: narrowed directory or detail with Back. At 768px and below: compact header, accessible drawer and one pane. Verify 1440, 1280, 768, 390 and 320 CSS pixels. Long labels/paths wrap; only named intrinsic code/diff regions scroll horizontally. No sticky action may obscure focus or the mobile keyboard.
+
+Scope: all five destinations and all six approved flows, including confirmations, loading, empty, filtered-empty, unavailable, cached, permission, pending, failed, retry, saved and selected states. Native semantics, labels, headings, current navigation, skip link, visible focus, keyboard order, modal focus return and restrained announcements are required. Polling never steals focus or announces unchanged output. Measure text/control/focus contrast, 200% text/zoom, 400% reflow, text spacing, reduced motion, forced colors, select insets and touch targets.
+
+Browser automation is available through an installed Playwright module and Chromium executable. Safari/Firefox, real touch, VoiceOver and full per-criterion WCAG 2.2 A/AA evidence remain unverified until explicitly exercised. Automated checks and screenshots are not WCAG or ADA conformance. No accessibility certification is claimed.
+
+## Acceptance matrix and evidence
+
+| Gate | Required proof | Current status |
 |---|---|---|
-| Goal/context/approval/generation | Exact route shapes inspected; typecheck and production build pass | Synthetic end-to-end preview/approval, changed-context 409, malformed model and connection failures |
-| Completion and continuation | Retained report/key, durable reload, separate retry and focus code | Network loss before/after save, reload, blocked/reopen and history interaction |
-| Clipboard | Same formatter string and existing selectable fallback | Assert preview equals clipboard, clipboard denial |
-| Keyboard/status | Semantic headings, native disclosures, labelled controls, focus styles, status text changes rather than polling counters | Keyboard-only focus order and screen-reader output |
-| Reflow/contrast/motion | Existing theme roles and reduced-motion rule reused; long button labels wrap; dark focus uses existing blue-3 | Inspect desktop/320px/200% renders; measure 4.5:1 text and 3:1 meaningful controls in both themes; reduced-motion browser checks |
-| Privacy | UI-only work; no live storage, credential, login, model or server restart exercised | Isolated fixtures first; user-assisted live checks belong to later approved steps |
+| Baseline | typecheck/tests/build; synthetic desktop/narrow | Passed: 315 tests / 31 files; JS 409.14 kB + lazy agent 37.88 kB; CSS 203.00 kB |
+| Routes/inbox model | legacy/invalid links, safe return, failures, bounded counts, typed action tests | Passed in the 324-test suite; browser Back/Forward and invalid-selection recovery passed |
+| Capability parity | all items in `.ezcoder/redesign-progress.md` reachable | Implemented and source-reviewed; runtime versus source-only coverage is itemized there |
+| Six workflows | four existing isolated walkthroughs, fresh delivery/coordination fixtures | All four walkthroughs passed; extended coordination/agent walkthroughs additionally pass connected assignment/start, separate acceptance, stalled resend/take-back, pause/resume, stop/retry and interrupted recovery |
+| Draft/retry safety | tabs/polling/failure/conflicts/duplicate submission tests | Tested paths passed; two completion requests produced one saved completion. Retained passing packets cannot satisfy missing/failed current checks; changed turns clear criteria, and manual-only acceptance requires acknowledgement |
+| Responsive/keyboard | widths, focus, navigation, dialogs, native controls | Chromium passed at 1440/1280/768/390/320; keyboard activation, drawer/dialog return and select dismissal passed |
+| Accessibility | changed-scope criterion evidence; manual assistive technology separately recorded | Partial evidence only: sampled contrast, keyboard, 200% root text, reflow, reduced motion and forced colors passed. Screen reader, real zoom, other platforms and full criterion audit remain unverified |
+| Visual critique | desktop/narrow, revise weakest criterion, recapture; >=20/24 with no floor failure | Provisional 22/24 after flattening cards, prioritizing next actions and recapture; does not override unverified accessibility acceptance |
+| Performance | final payload versus baseline, lazy agents, polling/console checks | Measured main JS regression +21.4%; agent/delivery loading deferred. Tested polling/focus and page-error assertions passed; long-session/field performance unmeasured |
+| Final checks | typecheck, all tests, build, diff/safety review | Passed: 324 tests / 33 files, typecheck and build. Final acceptance-copy rebuild and affected walkthrough passed; diff review complete |
 
-Earlier browser/contrast evidence below applies only to its earlier scope, not these new surfaces. No accessibility-conformance or live integration claim is made.
+Verification date: 22 September 2026, Chromium 153.0.8010.12, synthetic isolated fixtures. Screenshots: `.ezcoder/screenshots/workspaces/`, `step12/`, `coordination/` and `agent-platform/`. Final assets: main JS 496.58 kB (152.67 gzip), lazy agent 44.71 kB (15.80 gzip), lazy delivery 45.14 kB (14.58 gzip), shared checkbox 7.08 kB (2.70 gzip), CSS 212.95 kB (32.02 gzip). Sampled primary text contrast was 5.02:1 and secondary text 6.43:1; this is not an exhaustive contrast audit. Build time and a 155ms synthetic first-decision observation are not field-speed claims.
 
-## Delivery context boundary (approved step 7)
+Behavioral follow-up: typecheck and 324 tests passed again. A fresh agent → coordination → delivery harness sequence also exited 0 after the requested test-integrity review on 22 September 2026; this is browser-runtime evidence, not an inference from unit tests. Existing agent assertions were preserved; no further code correction was needed. Coordination asserts the original three manual reports, then one explicitly started synthetic agent produces the fourth. Agent acceptance does not accept the milestone; that separate decision is exercised and survives reload. Interruption uses a real graceful fixture-runtime restart with post-listen readiness acknowledgement, persistent workspace/session/history and explicit resume confirmation. Stalled-work age uses the browser clock. No production app code changed in this follow-up.
 
-Local collection is opt-in and separate from external-send approval. The packet itself is the preview: category-labelled sources, stable source IDs, explicit user-report provenance, limitations and a SHA-256 fingerprint bound to provider/model and exact packet contents. Later guarded routes must persist and verify approval; no routes, transmission, authentication or generation are added here.
+Landing-review corrections: the portable tracked `test/run-ui-check.mjs` now supplies fixture lifecycle and restart IPC. Agent, coordination and delivery walkthroughs passed again through that harness using an existing Playwright/Chromium installation, without the ignored local wrapper. Typecheck and all 324 tests also passed again. README now names the current engagement control.
 
-Only selected product Markdown documents are read (8 plus 4 reviewed extra documents), each capped at 64 KiB and excerpted to 4,000 characters after whole-file secret screening. Additional docs require a matching full-file review digest. Package evidence exports dependency names, not scripts/config/URLs. Entrypoints use a fixed bounded candidate list, not bulk traversal. History includes at most 10 saved milestone plans and 50 explicit Dave user completion reports, not imported tasks, legacy notes, raw sessions or model judgments. The complete packet is capped at 64,000 bytes. Rejected content produces generic errors, never file bodies.
+Remaining behavioral evidence limits: hard crash/power loss, real elapsed multi-day stalling, live agent/provider execution, scope-change and repeated-failure decision branches, dependency controls and export do not gain new browser evidence from these tests. Details and exact verification commands are in `.ezcoder/redesign-progress.md`.
 
-The collector reuses the read-only filesystem boundary and evidence-scan size policy, deliberately not the broad legacy documentation sweep (which includes agent/task documents). Canonical containment, regular-file checks, symlink-component rejection and bounded no-follow handle reads protect selected files. Regex screening cannot establish that arbitrary prose contains no private business data: local review and later exact-preview transmission consent remain required. Current manifest support is package.json; entrypoint coverage is explicitly partial. Parent-supplied memsearch bounded-input and supermemory validated-input controls informed this boundary; their task integration and execution mechanisms are not reused.
-
-## Design read
-Local, single-operator application with frequent short visits and expensive context switches. The primary job is finding the next evidenced human decision, not surveying activity. Keep the existing Mantine typography, Container `lg` rail, Stack/Group spacing, bordered `md` cards and Tabler icons. No new visual dependency, imagery, theme or decorative dashboard metrics.
-
-First glance: ranked request and honest coverage. Second glance: source text, timestamps, destination and handoff. The distinctive interaction is remembering an evidence revision, not marking an upstream task complete. One queue, three recommendations, explicit remaining count, history and snoozes. Projects become a secondary searchable directory.
-
-## Components and states
-- Native buttons and links; details/summary for evidence. Text is escaped by React.
-- One shared responsive rail for header, navigation and main content. Content-bearing header has no fixed height. Groups wrap; long text can break anywhere.
-- Queue actions use persisted responses without external scans. Pending writes disable competing actions; success is announced through a status region. Focus returns to queue heading after removal; Undo remains available.
-- Displayed IDs alone are marked seen. History does not mark queued work seen. The first scan sets a baseline.
-- Empty queue means no decisions in checked evidence, never universal health. Coverage distinguishes checked, cached and unavailable.
-- Errors preserve useful content and offer Retry. Clipboard denial exposes selectable text. Known-project hash destinations preserve Back/Forward and search; return to a decision restores focus.
-- Automatic updates use one coalesced, visible-page schedule, with pause and teardown. A focused decision or summary editor defers incoming content behind Apply update. Snoozes expire from the clock even on cached reads.
-- Reused Mantine palette: primary shade 8 and gray-7 secondary text in light mode, gray-4 in dark mode. Default control borders use gray-6. Keyboard focus uses a visible outline; pointer activation does not invent selected state. Native disclosures and a skip link avoid custom keyboard machinery.
-
-## Evidence and boundaries
-Existing components are the primary design source. Approved plan contrasts the old scanning-heavy Today/Inbox with nao's durable recommendation identity and cmux's notification-to-context flow. Those are product/structural evidence, not visual assets or runtime guarantees.
-
-## Verification record: 8 September 2026
-
-### Runtime evidence
-- `npm test`: **147 passing tests in 18 files**. `npm run typecheck` and `npm run build` pass. No new dependency or test framework was installed.
-- Storage: explicit v3-to-v4 preservation, repeated open, injected rollback, failed-backup abort, future-version refusal, and native-backup restore into a separate fixture. Latest restore/inspection took **2ms**. This is a fixture restore time, not a promised production recovery time. App-local migration backup protects the pre-migration committed state; disk loss and off-device recovery remain outside scope.
-- Attention: unchanged observations stay suppressed; meaningful revisions surface; failed reads preserve existing evidence; successful absence deactivates it; inactive Undo does not invent current work. Seen state and snoozes survive stored-state round trips. Fifty-project fixture proves the twelve-project cap and explicit over-cap/failed-source coverage.
-- External read-only fixture: full tree size, mtime and SHA-256 unchanged after refresh, summary correction, pin, handle, snooze, dismiss, Undo, seen and handoff. Existing read and subprocess spies still enforce denied files and allowed Git operations.
-- Browser: installed Playwright **1.60.0**, headless Chromium, synthetic fixture only. `test/ui-walkthrough.mjs` passed keyboard queue → project → copy fallback → Back/Forward → Handled → Undo. It asserted focus restoration, searchable/reloadable destinations, actual empty queue through local fixture actions, error preservation/Retry, 320px and 200% text reflow, reduced-motion/forced-colors modes, minute refresh, pause, hidden-tab silence, return refresh and focused-item deferral. No page JavaScript errors observed.
-- Rendered light-mode text contrast: primary button text **5.02:1**, secondary text **8.18:1**. This samples changed semantic roles; it is not a whole-application contrast audit.
-- Build output: JS **344.40 KB / 108.56 KB gzip**; CSS **202.31 KB / 29.53 KB gzip**. These are final payload measurements, not before/after performance claims.
-
-### Real-project check
-Read the operator's actual discovery sources with **temporary app storage** and no live database migration. Found **23 existing projects**: **12 checked, 11 cached/not-deep-checked, 0 unavailable**, with **0 adapter issues**. The first direct scan took **1,907ms**. A separate real-source API pass verified cached GET reuse plus pinning and summary correction stored only in its temporary database; that multi-refresh pass took **9,431ms**.
-
-There were **0 qualifying human requests** in those real observations. The quiet queue is intentional, not a generated success metric. Real-data handling/snooze could not be exercised on a naturally occurring decision; those actions were verified using synthetic fixture decisions. Real project names, paths and contents were not included in screenshots. The live app database remained unopened during these checks.
-
-### Rendered critique and revision
-The first render buried coverage below all recommendations and used low-contrast default secondary text. Moved coverage ahead of the queue, compacted its warning, removed the decorative header shield, strengthened reused palette roles, and recaptured desktop/narrow output. Existing project-card rows now wrap and correction/evidence controls are keyboard reachable.
-
-Rubric (0–2 each): specificity 2; hierarchy 2; composition 2; consistency/flow 2; typography 2; surfaces 2; states 2; responsive 1; accessibility 1; motion 2; authentic content 2; distinctiveness 1. **21/24**, with remaining gaps below, not a conformance certificate.
-
-Synthetic artifacts, ignored from version control, live under `.ezcoder/screenshots/`: `decisions-desktop.png`, `decisions-narrow.png`, `decisions-200-percent.png`, `project-desktop.png`, `project-narrow.png`, `empty-queue.png`. The fixture server was stopped after verification.
-
-### Changed-scope accessibility audit
-Scope: Decisions, history/snoozes, directory, project detail, copy, local actions, hash navigation and refresh recovery. Browser evidence covers desktop Chromium with keyboard/pointer and 320 CSS-pixel reflow. This is a partial changed-scope audit, not an assertion about every WCAG criterion or every existing component.
-
-| Area / relevant criteria | Evidence status |
-|---|---|
-| Keyboard operation and focus order/visibility (2.1.1, 2.1.2, 2.4.3, 2.4.7) | Runtime: primary flow completes, no trap observed, focus restored to queue or destination |
-| Skip repeated blocks (2.4.1) | Code: native skip link focuses main without changing project route |
-| Labels, structure, status (1.3.1, 2.4.6, 4.1.2, 4.1.3) | Code and browser DOM checks: native controls, labelled search/fallback, headings and live status; assistive-technology output unverified |
-| Text contrast (1.4.3) | Runtime: sampled primary/secondary light roles pass; remaining roles, themes and hover/error states unverified |
-| Text resize/reflow (1.4.4, 1.4.10) | Runtime: no horizontal overflow at 320px or 200% root text in tested queue; long-path project checked at 320px |
-| Pause auto-updates (2.2.2) | Runtime: paused and hidden pages issue no automatic reads; focused decisions stay stable |
-| Text errors and recovery (3.3.1, 3.3.3) | Runtime: clipboard denial, failed read and Retry preserve useful context |
-| Non-text contrast, target spacing, pointer behavior (1.4.11, 2.5.2, 2.5.8) | Code: stronger borders, native activation, normal-size new controls; exhaustive measurement unverified |
-| Reduced motion / forced colors | Runtime: modes exercised without reflow failure; source provides reduced transitions and system focus color |
-| Screen-reader, native touch, Safari/Firefox, dark-mode audit, RTL/localization, full text-spacing overrides | Unverified |
-| Media alternatives, dragging, authentication, payments | Not applicable to this changed local flow: no media, drag, login or payment surface added |
-
-No project accessibility scanner was installed; none was added. A full criterion-by-criterion audit and representative screen-reader walkthrough remain necessary before any WCAG/ADA claim. No legal-compliance or accessibility-conformance claim is made.
-
-### Product acceptance: measured versus not measured
-The synthetic first decision rendered in **258ms** in the final walkthrough. One-click project context and one-action suppression followed by Undo were observed. Rendering latency is **not** evidence that a human chooses correctly within 30 seconds. The 30-second comprehension target and reduced effort during repeated actual daily use remain unmeasured.
-
-### Known ceilings
-Deep reads remain capped at twelve projects; no rotating monitoring. Any task/discovery failure conservatively blocks absence-based reconciliation for that scan, not just one task source. Session context still comes from opening prefixes. History is retained, with browser pages of 100 rows; the local snapshot still carries complete history, so server-side history pagination is a future scale boundary. Clipboard filtering removes recognizable code/credential shapes, not arbitrary sensitive prose. No agent execution, editor resume contract, paid service, permanent scanner or off-device backup was introduced.
+Implementation and automated verification are finished; manual accessibility/platform acceptance remains open. Real provider entitlement, credentials and live agents were intentionally not exercised. Historical runtime evidence in earlier versions of this document described earlier UIs and is not evidence for this redesign. Durable source/data boundaries above remain authoritative. Generated screenshots and logs stay ignored; no commits or releases are authorized.

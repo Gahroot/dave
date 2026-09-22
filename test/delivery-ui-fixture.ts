@@ -1,6 +1,8 @@
 // Synthetic-only isolated server: no real provider, Keychain or discovery home.
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { buildServer } from '../src/server/index.ts';
 import { sourcePaths } from '../src/shared/paths.ts';
 import { createProviderService, type OwnedAuth } from '../src/providers/index.ts';
@@ -10,6 +12,10 @@ const root = tempDir('delivery-ui-');
 const paths = sourcePaths(path.join(root, 'home'), path.join(root, 'app'));
 const dir = path.join(paths.home, 'code', 'synthetic-onboarding');
 writeText(path.join(dir, 'README.md'), '# Synthetic onboarding\nWhole member onboarding, staff review and operational recovery. No external client data.');
+// Connected handoffs need a clean Git root. This checkout lives only in the fixture temp directory.
+const git = (...args: string[]) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', dir, ...args], { stdio: 'pipe' });
+git('init', '-q'); git('add', 'README.md');
+git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@localhost', 'commit', '-qm', 'Synthetic fixture');
 writeJson(path.join(paths.ezcoder.taskProjects, 'synthetic', 'meta.json'), { path: dir, name: 'Synthetic onboarding' });
 let connected = true;
 const fakeAuth = {
@@ -20,7 +26,9 @@ const fakeAuth = {
 const plan = { assumptions: ['Synthetic implementation only; no client access or acceptance claimed.'], milestones: ['Whole guided member onboarding', 'Staff review and corrections', 'Daily operational recovery'].map((title, i) => ({ title, outcome: `Deliver ${title.toLowerCase()} with accessible guided steps, validation, durable progress, understandable recovery and a complete usable finish for members returning after interruption.`, whyNow: 'A whole daily capability is needed, not a sample test or a commit instruction.', scope: ['Implement the complete interface, validation, persistence, recovery and end-to-end completion', 'Preserve existing changes and verify the whole workflow using synthetic cases'], exclusions: ['No deployment or real client data'], acceptance: ['A member completes the whole workflow', 'Reload preserves progress and recoverable errors retain input'], sourceIds: [], humanPrerequisites: [], dependencies: i ? [i - 1] : [] })) };
 const providers = createProviderService({ authFactory: () => fakeAuth, inference: async () => { await new Promise(r => setTimeout(r, 4500)); return JSON.stringify(plan); } });
 providers.restore('session');
-const app = await buildServer(paths, { providers, browserOrigins: ['http://127.0.0.1:4320'] });
+const app = await buildServer(paths, { providers, browserOrigins: ['http://127.0.0.1:4320'],
+  agentOptions: { command: process.execPath, args: [fileURLToPath(new URL('./fixtures/agent-acp.mjs', import.meta.url))] },
+});
 const portfolio = (await app.inject('/api/portfolio')).json<Portfolio>();
 const project = [...portfolio.active, ...portfolio.other][0];
 if (!project) throw new Error('Synthetic discovery failed');

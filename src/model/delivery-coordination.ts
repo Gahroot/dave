@@ -19,6 +19,8 @@ export type EvidenceResult = {
 export type DeliveryHandoff = {
   id: string; planId: string; milestoneId: string; contractId: string;
   criteria: { id: string; text: string }[];
+  /** When it was sent off. Null for rows that predate send-time recording; age is then unknown. */
+  createdAt: string | null;
 };
 export type CoordinationState = {
   contract: FinishContract | null;
@@ -27,7 +29,8 @@ export type CoordinationState = {
   handoffs: DeliveryHandoff[];
   reports: { id: string; handoffId: string; report: EvidenceResult; createdAt: string }[];
   decisions: { id: string; milestoneId: string; reportId: string | null; action: "accept" | "return"; reason: string; createdAt: string }[];
-  focusProjectId: string | null;
+  /** Whether this project is one you are actively delivering; null means not taken on. */
+  engagement: "active" | "paused" | null;
 };
 export function coordinationText(value: unknown, max = 2000): asserts value is string {
   if (typeof value !== "string" || !value.trim() || value.length > max || !contextTextSafe(value)) throw new CoordinationInputError("Invalid, unsafe or oversized text");

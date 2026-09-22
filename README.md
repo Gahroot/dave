@@ -20,23 +20,83 @@ Fixtures must also pass an isolated home to `sourcePaths(home, appHome)`.
 For hot-reloading development, run `npm run server` and `npm run dev` separately.
 The server alone serves the last built UI; Vite proxies API requests to port 4317.
 
-## Two different kinds of read-only
+## Read-only discovery and opt-in execution
 
-- **External sources are strictly read-only.** Your projects, EZCoder, EZBoss
-  and pew2 are never written to. Nothing starts an agent, dispatches a task,
-  runs a project command, or touches git beyond read-only queries.
+- **Discovery is still read-only.** Portfolio scans, summaries and manual handoffs
+  never execute project commands or modify external sources.
+- **Agent desk is an explicit execution mode.** When enabled, user-authorized
+  assignments create Git worktrees, launch the installed ACP agent, resume its
+  conversations and run approved checks. This writes Git worktree/branch metadata
+  and the agent's own session storage. It is not a sandbox.
 - **The command center maintains its own storage automatically.** Summaries and
   rankings are generated and refreshed without you. You are not its database
   administrator.
 
+## Connected agent platform
+
+1. Open **Agent desk**. Review the execution risk, enable execution, uncheck
+   **Pause new starts**, and save. Execution is disabled by default; every server
+   restart pauses new starts until you explicitly resume.
+2. Queue an assignment for a discovered, clean Git repository. Include acceptance
+   criteria and, optionally, approved checks as JSON argument arrays, e.g.
+   `[{"label":"Tests","command":"npm","args":["test"]}]`. No shell interpolation.
+   Git identity/commits and dependency installation remain your responsibility.
+3. DAVE creates `PCC_HOME/workspaces/<run-id>` on branch `dave/<run-id>`. The original
+   checkout must be clean so uncommitted work is never silently excluded. Nothing
+   is automatically committed, merged, deployed or deleted.
+4. Follow the run's activity. Permission requests from compatible ACP providers
+   appear as one-time choices. EZCoder currently auto-approves its own tools; its
+   messages/questions are addressed by replying after the turn ends.
+5. Inspect the diff and agent response, run configured checks, then reply/request
+   changes in the same session or explicitly accept the exact workspace evidence.
+   Acceptance requires every configured check to pass; manual-only review requires
+   a separate acknowledgement. Source changes invalidate prior check evidence.
+6. Failed/interrupted runs stay visible. Retry is explicit; disconnected runs also
+   require confirmation that previous work stopped. **Close without accepting**
+   retains the history and workspace without claiming completion.
+
+The initial runner is installed **EZCoder ACP** (`ezcoder acp`). Authenticate and
+configure it using its own tools; DAVE does not handle its credentials. Optional
+`DAVE_AGENT_COMMAND=/absolute/path/to/acp-wrapper` changes the executable; DAVE passes
+`acp` as its argument. Other wrappers must implement ACP v1 session loading; they
+are not verified integrations. Claude/Codex-native adapters, terminal emulation,
+auto-merge, remote workers and operating-system sandboxing are not implemented.
+
+Limits: 2 active runs globally / 1 per project / review backlog 3 by default,
+configurable in Agent desk; up to 100 unresolved assignments and 12 turns each.
+Dependencies start only after human acceptance. Acceptance does not integrate code
+into another worktree: dependent assignments start from the original checkout's
+current HEAD, so integrate prerequisite changes outside DAVE before dispatching
+code-dependent work. Pause dispatch while doing that. Limits count DAVE-owned
+runs, not arbitrary delegation inside an agent. Check processes time out after
+2 minutes; agent turns default to 30 minutes. Stored output is capped at 2,000
+chunks / approximately 1 MB per run, displayed activity at 500 events. Large
+changes fail review explicitly rather than pretending to provide complete evidence.
+
+Agents/checks run with your local account's privileges and can use the network,
+read credentials and incur provider charges. Worktrees are file separation, not
+access control. The process guardian ends the owned process group on stop, timeout
+or server-pipe loss; intentionally detached grandchildren can escape that group.
+Do not enable execution for untrusted repositories or untrusted agent programs.
+Agent requests cannot grant persistent permissions through DAVE. Common credential
+patterns are redacted from output, but arbitrary secrets/private prose cannot be
+reliably recognized; all run history stays in the local app database.
+
+Migration v9 adds tables without rewriting delivery history. Existing migration
+backups cover pre-upgrade committed state on this machine, not off-device disaster
+recovery. Workspaces are retained; disk usage requires operator management.
+
+Implementation plan and provenance: [docs/agent-platform-plan.md](docs/agent-platform-plan.md).
+
 ## Bounded delivery coordination (optional)
 
-DAVE can coordinate any discovered project without a model connection. External
-projects remain read-only; **you** transfer assignments and reports to/from your
-coding tool. DAVE does not execute, deploy, independently verify, or contact clients.
+DAVE can coordinate any discovered project without a model connection. Manual
+copy/import remains available without execution. Alternatively, **Run this assignment
+in DAVE** opens Agent desk with the exact handoff. Valid structured reports return
+automatically; reported success never automatically accepts the milestone.
 
 1. Open the project, save its goal/user/workflow/stage with **Local coordination**,
-   then choose **Make this my delivery focus**. Today remembers this choice.
+   then choose **Start delivering this**. Inbox tracks this delivery alongside your other active projects.
 2. Define 2–12 observable finish criteria, exclusions, and named human prerequisites.
    Map criteria to milestones; unmapped criteria remain visibly uncovered.
 3. **Copy planning assignment**, review the returned 3–6-milestone JSON, and import
@@ -81,7 +141,7 @@ finish contract is adopted. They are historical claims, not grandfathered accept
    directory, request, next step, timestamps and source identity. Code and recognizable
    credential patterns are omitted. Review context before sharing; arbitrary sensitive
    prose cannot be reliably recognized. Clipboard denial leaves selectable text.
-   Nothing launches an editor, shell command or agent.
+   These copy actions do not launch an editor, shell command or agent.
 5. **Handled** acknowledges this evidence locally. **Tomorrow** stores 09:00 on
    the next local calendar day; its absolute deadline appears in History.
    **Not relevant** dismisses the revision. **Undo** reopens the same revision

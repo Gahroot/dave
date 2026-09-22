@@ -100,11 +100,20 @@ it("runs the entire guarded local coordination loop without calling a provider o
   }
   expect(deriveDeliveryProgress(saved.state, saved.coordination).readyForReview).toBe(true);
   expect(saved.state.nextPlans).toEqual([]);
-  expect((await f.post(f.base + "/coordination/focus", { expectedRevision: saved.state.revision })).statusCode).toBe(200);
-  expect((await f.get("/api/delivery/focus")).json()).toEqual({ projectId: f.id });
+  expect((await f.post(f.base + "/coordination/engage", { expectedRevision: saved.state.revision, state: "active" })).statusCode).toBe(200);
+  const queue = (await f.get("/api/delivery/queue")).json();
+  expect(queue.limit).toBe(3);
+  expect(queue.entries).toMatchObject([{ projectId: f.id, state: "active", step: { kind: "done" } }]);
   expect((await f.post(`/api/projects/${f.id}/override`, { hidden: true })).statusCode).toBe(200);
-  expect((await f.get("/api/delivery/focus")).json()).toEqual({ projectId: f.id }); // Never silently retarget a hidden focus.
+  expect((await f.get("/api/delivery/queue")).json().entries).toEqual([]); // Hidden projects leave the list rather than being silently retargeted.
   expect((await f.post(`/api/projects/${f.id}/override`, { hidden: false })).statusCode).toBe(200);
+  const pack = (await f.get(f.base + "/pack")).json().markdown as string;
+  expect(pack).toContain("what was delivered");
+  expect(pack).toContain("Bounded fixture pilot");
+  expect(pack).toContain("Observed fixture success, not live acceptance");
+  // This fixture never reported a command, and the pack says so rather than implying checks were run.
+  expect(pack).toContain("No commands were reported for the accepted work.");
+  expect(pack).toContain("No independent party has verified it");
   await f.app.close(); apps.splice(apps.indexOf(f.app), 1); const restarted = await f.server();
   const restored = (await restarted.get(f.base)).json(); expect(restored.coordination.reports).toHaveLength(3);
   expect(f.infer).not.toHaveBeenCalled(); expect(f.factory).not.toHaveBeenCalled();

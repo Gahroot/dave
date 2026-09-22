@@ -5,7 +5,7 @@ Local dashboard that discovers projects from Ezboss, Ezcoder and Pew2 state, com
 
 ## Boundaries and invariants
 
-- External project/agent state is read-only; user overrides and inbox state belong in the app's SQLite store, not upstream tools. Keep the server loopback-only: it exposes private local state (`src/shared/paths.ts`, `src/server/index.ts`).
+- Discovery stays read-only. Agent desk is an explicit opt-in exception: operator-approved assignments create app-owned Git worktrees, launch local ACP sessions and run approved checks. Never exercise it against real projects or paid agents without explicit authorization; use isolated fixtures. Worktrees are not security sandboxes. Overrides, runs, evidence and reviews belong in app SQLite. Keep the server loopback-only and protect execution routes with the existing CSRF/origin guard (`src/agents/`, `src/server/agent-routes.ts`).
 - Ezcoder discovery must not open `projects.json`: it is explicitly credential-denied, not a project inventory. Supported discovery paths are defined in `sourcePaths()` (`src/shared/paths.ts`).
 - `PCC_HOME` relocates only application storage (`pcc.db`); it does not relocate external discovery sources. Tests isolating all sources need an explicit fixture `home` passed to `sourcePaths()` (`src/shared/paths.ts`, `src/db/index.ts`).
 - Opening an existing pre-v3 database drops legacy setup tables and clears snapshots, inbox items and adapter issues. Merely starting the server performs this migration; use fixture storage when investigating old schemas (`src/db/index.ts`, `src/server/index.ts`).

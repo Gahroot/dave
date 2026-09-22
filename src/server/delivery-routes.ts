@@ -6,6 +6,8 @@ import { deliveryPlanner, type GenerationPurpose } from "../model/delivery-plann
 import { PlanOutputError, type DeliveryGoal } from "../model/delivery-schema.ts";
 import { deliveryCoordinationRepo } from "../db/delivery-coordination-repo.ts";
 import { CoordinationInputError } from "../model/delivery-coordination.ts";
+import { WIP_LIMIT } from "../model/delivery-queue.ts";
+import { deliveryPack, PackError } from "../model/delivery-pack.ts";
 import { PlanningFailure, type PlanningInference } from "../providers/openai.ts";
 import { strictObject } from "./provider-routes.ts";
 
@@ -129,21 +131,32 @@ export function registerDeliveryRoutes(app: FastifyInstance, db: Db, inference: 
       return document;
     } catch (error) { return failure(error, reply); }
   });
-  app.get("/api/delivery/focus", async () => ({ projectId: (db.prepare("SELECT project_id FROM delivery_focus WHERE singleton=1").get() as { project_id: string } | undefined)?.project_id ?? null }));
-  for (const action of ["focus", "contract", "plan", "resolve", "handoff", "report", "review", "block"] as const) {
+  app.get("/api/delivery/queue", async (_req, reply) => {
+    try { return { limit: WIP_LIMIT, entries: coordination.queue() }; } catch (error) { return failure(error, reply); }
+  });
+  app.get<{ Params: { id: string } }>(`${base}/pack`, async (req, reply) => {
+    try {
+      const project = db.prepare("SELECT name FROM projects WHERE id=?").get(req.params.id) as { name: string } | undefined;
+      if (!project) throw new DeliveryError("invalid", "Unknown project");
+      const { state, coordination: data } = coordination.read(req.params.id);
+      return { markdown: deliveryPack({ projectName: project.name, state, coordination: data }) };
+    } catch (error) { return failure(error instanceof PackError ? new DeliveryError("invalid", error.message) : error, reply); }
+  });
+  for (const action of ["engage", "contract", "plan", "resolve", "handoff", "resend", "report", "review", "block"] as const) {
     app.post<{ Params: { id: string } }>(`${base}/coordination/${action}`, async (req, reply) => {
       try {
-        const fields = { focus: [], contract: ["contract"], plan: ["plan"], resolve: ["prerequisiteId", "evidence"], handoff: ["milestoneId"], report: ["idempotencyKey", "report"], review: ["milestoneId", "action", "reason"], block: ["milestoneId", "reason"] }[action];
+        const fields = { engage: ["state"], contract: ["contract"], plan: ["plan"], resolve: ["prerequisiteId", "evidence"], handoff: ["milestoneId"], resend: ["milestoneId", "reason"], report: ["idempotencyKey", "report"], review: ["milestoneId", "action", "reason"], block: ["milestoneId", "reason"] }[action];
         strictObject(req.body, ["expectedRevision", ...fields]);
         const b = req.body, id = req.params.id;
         if (!Number.isSafeInteger(b.expectedRevision) || (b.expectedRevision as number) < 0) throw new DeliveryError("invalid", "Invalid revision");
         for (const field of fields.filter(f => !["contract", "report"].includes(f))) if (typeof b[field] !== "string") throw new DeliveryError("invalid", `Invalid ${field}`);
         const revision = b.expectedRevision as number;
-        if (action === "focus") return coordination.focus(id, revision);
+        if (action === "engage") return coordination.engage(id, revision, b.state as "active" | "paused");
         if (action === "contract") return coordination.saveContract(id, revision, b.contract);
         if (action === "plan") return coordination.saveManualPlan(id, revision, b.plan as string);
         if (action === "resolve") return coordination.resolve(id, revision, b.prerequisiteId as string, b.evidence as string);
         if (action === "handoff") return coordination.handoff(id, revision, b.milestoneId as string);
+        if (action === "resend") return coordination.resend(id, revision, b.milestoneId as string, b.reason as string);
         if (action === "report") return coordination.submit(id, revision, b.idempotencyKey as string, b.report);
         if (action === "block") return coordination.block(id, revision, b.milestoneId as string, b.reason as string);
         return coordination.review(id, revision, b.milestoneId as string, b.action as "accept" | "return", b.reason as string);

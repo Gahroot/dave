@@ -11,6 +11,12 @@ export function reportFailures(report: EvidenceResult): string[] {
     ...report.blockers,
   ];
 }
+/**
+ * After this many rejected results the milestone stops being sendable. Retrying a
+ * fourth time has never been the answer: the scope, the split or the blocker is wrong.
+ */
+export const RETURN_LIMIT = 3;
+
 export function deriveDeliveryProgress(state: DeliveryState, coordination: CoordinationState) {
   const contract = coordination.contract;
   const plan = state.plans.find(p => p.id === state.currentPlanId);
@@ -20,17 +26,23 @@ export function deriveDeliveryProgress(state: DeliveryState, coordination: Coord
     const report = handoff ? coordination.reports.filter(r => r.handoffId === handoff.id).at(-1) : undefined;
     const decision = report ? coordination.decisions.filter(d => d.milestoneId === m.id && d.reportId === report.id).at(-1) : undefined;
     const prerequisites = contract?.prerequisites.flatMap((p, i) => p.milestones.includes(m.position) && !coordination.resolutions[`p${i}`] ? [`${p.owner}: ${p.text}`] : []) ?? [];
+    // Only rejections of delivered work count. Parking something you are blocked on is
+    // not a failed attempt, so it must never push a milestone towards the retry limit.
+    const rejections = coordination.decisions.filter(d => d.milestoneId === m.id && d.action === "return" && d.reportId);
     return { milestone: m, handoff, report, accepted: decision?.action === "accept", prerequisites,
-      status: "ready" as "ready" | "waiting" | "handed-off" | "needs-review" | "accepted" };
+      returns: rejections.length, returnReasons: rejections.slice(-RETURN_LIMIT).map(d => d.reason),
+      status: "ready" as "ready" | "waiting" | "handed-off" | "needs-review" | "accepted" | "contested" };
   });
   for (const item of milestones) {
     const dependencies = item.milestone.dependencies.every(d => milestones[d]?.status === "accepted");
-    item.status = stale || !contract || item.milestone.status === "blocked" || item.prerequisites.length || !dependencies ? "waiting" : item.accepted ? "accepted" : item.report ? "needs-review" : item.handoff ? "handed-off" : "ready";
+    item.status = stale || !contract || item.milestone.status === "blocked" || item.prerequisites.length || !dependencies ? "waiting" : item.accepted ? "accepted" : item.report ? "needs-review" : item.handoff ? "handed-off" : item.returns >= RETURN_LIMIT ? "contested" : "ready";
   }
   const uncovered = contract?.criteria.filter(c => !c.milestones.length || c.milestones.some(p => !milestones[p])) ?? [];
   const criteria = contract?.criteria.map((c, i) => ({ id: `c${i}`, text: c.text, accepted: !!c.milestones.length && c.milestones.every(p => milestones[p]?.status === "accepted") })) ?? [];
   const unresolved = contract?.prerequisites.flatMap((p, i) => !coordination.resolutions[`p${i}`] ? [{ id: `p${i}`, ...p }] : []) ?? [];
-  const next = milestones.find(m => m.status === "needs-review") ?? milestones.find(m => m.status === "handed-off") ?? milestones.find(m => m.status === "ready");
+  // Contested work outranks fresh work: it is the only thing that can never finish on its own.
+  const next = milestones.find(m => m.status === "needs-review") ?? milestones.find(m => m.status === "handed-off")
+    ?? milestones.find(m => m.status === "contested") ?? milestones.find(m => m.status === "ready");
   return { stale, milestones, next, uncovered, criteria, unresolved,
     readyForReview: !!contract && !stale && !!milestones.length && milestones.every(m => m.status === "accepted") && criteria.every(c => c.accepted) && !unresolved.length && !uncovered.length };
 }

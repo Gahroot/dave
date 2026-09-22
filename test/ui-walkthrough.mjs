@@ -15,7 +15,7 @@ const base = 'http://127.0.0.1:4318';
 await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => { throw new Error('fixture denial'); } } }));
 async function keyboardTo(label) {
   for (let n = 0; n < 100; n++) {
-    if (await page.evaluate((text) => document.activeElement?.textContent?.trim() === text, label)) return;
+    if (await page.evaluate((text) => document.activeElement?.textContent?.trim() === text && document.activeElement?.matches(':focus-visible'), label)) return;
     await page.keyboard.press('Tab');
   }
   throw new Error(`Keyboard could not reach ${label}`);
@@ -25,12 +25,15 @@ const contrast = (fg, bg) => {
   const a = lum(fg), b = lum(bg);
   return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
 };
+async function openFirstRequest(target) { await target.locator('[data-inbox-key^="request:"]').first().click(); await target.locator('[data-attention-id]').first().waitFor(); }
+async function openProject(target) { await openFirstRequest(target); await target.getByRole('link', { name: 'View project', exact: true }).click(); }
+async function navigate(target, label) { if (!await target.getByRole('link', { name: label, exact: true }).isVisible()) await target.getByRole('button', { name: 'Menu', exact: true }).click(); await target.getByRole('link', { name: label, exact: true }).click(); }
 let primaryContrast;
 let secondaryContrast;
 try {
   const started = performance.now();
   await page.goto(base);
-  await page.locator('[data-attention-id]').first().waitFor();
+  await openFirstRequest(page);
   const identifyMs = Math.round(performance.now() - started);
   const colors = await page.getByRole('button', { name: 'Handled', exact: true }).first().evaluate((e) => ({ fg: getComputedStyle(e).color, bg: getComputedStyle(e).backgroundColor }));
   primaryContrast = contrast(colors.fg, colors.bg);
@@ -70,11 +73,13 @@ try {
     await saveButton.click();
     await page.getByRole('button', { name: 'Correct Most recently worked on: Synthetic draft must survive rejection', exact: true }).waitFor();
   }
+  await page.getByRole('tab', { name: 'Context', exact: true }).click();
   await keyboardTo('Copy handoff');
   await page.keyboard.press('Enter');
   await page.getByLabel('Copy handoff: selectable text').waitFor();
   assert.match(await page.getByLabel('Copy handoff: selectable text').inputValue(), /Directory:/);
   await page.screenshot({ path: `${out}/project-desktop.png`, fullPage: true });
+  await page.goBack(); // Context -> Overview retains the project workspace.
   await page.goBack();
   await page.locator(`[data-attention-id="${itemId}"]`).waitFor();
   assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'View project');
@@ -84,14 +89,14 @@ try {
   await keyboardTo('Handled');
   await page.keyboard.press('Enter');
   await page.waitForFunction((id) => !document.querySelector(`[data-attention-id="${id}"]`), itemId);
-  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Decision queue');
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Inbox');
   await keyboardTo('Undo last action');
   await page.keyboard.press('Enter');
   await page.locator(`[data-attention-id="${itemId}"]`).waitFor();
   assert.match(await page.getByRole('status').allTextContents().then((texts) => texts.join(' ')), /Reopened locally/);
   await page.getByRole('link', { name: 'Projects', exact: true }).click();
   await page.getByLabel('Search projects by name or full path').fill('does-not-exist');
-  await page.getByText('No matching projects. Clear the search to see the directory.').waitFor();
+  await page.getByRole('heading', { name: 'No matching projects', exact: true }).waitFor();
   await page.getByLabel('Search projects by name or full path').fill('export');
   await page.getByRole('link', { name: 'Synthetic export portal', exact: true }).click();
   await page.reload();
@@ -100,7 +105,7 @@ try {
   await page.setViewportSize({ width: 320, height: 900 });
   await page.screenshot({ path: `${out}/project-narrow.png`, fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'project reflow');
-  await page.getByRole('link', { name: 'Decisions', exact: true }).click();
+  await navigate(page, 'Inbox');
   await page.screenshot({ path: `${out}/decisions-narrow.png`, fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'queue reflow');
   await page.evaluate(() => document.documentElement.style.fontSize = '200%');
@@ -114,7 +119,7 @@ try {
   await page.route('**/api/refresh', (route) => route.fulfill({ status: 503, body: '{}' }));
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await page.getByRole('button', { name: 'Retry', exact: true }).waitFor();
-  assert.ok(await page.locator('[data-attention-id]').count());
+  assert.ok(await page.locator('[data-inbox-key]').count());
   await page.unroute('**/api/refresh');
   await page.getByRole('button', { name: 'Retry', exact: true }).click();
   await page.waitForFunction(() => ![...document.querySelectorAll('button')].some((b) => b.textContent === 'Retry'));
@@ -125,7 +130,7 @@ try {
   try {
     for (const id of ids) assert.equal((await fetch(`${base}/api/attention/${id}/handled`, { method: 'POST' })).status, 200);
     await page.goto(base);
-    await page.getByText('No current decisions in checked evidence', { exact: true }).waitFor();
+    await page.getByText('No current attention in loaded evidence', { exact: true }).waitFor();
     await page.screenshot({ path: `${out}/empty-queue.png`, fullPage: true, animations: 'disabled' });
   } finally {
     for (const id of ids) assert.equal((await fetch(`${base}/api/attention/${id}/undo`, { method: 'POST' })).status, 200);
@@ -136,7 +141,7 @@ try {
   let reads = 0;
   timed.on('request', (r) => { if (r.url().endsWith('/api/portfolio')) reads++; });
   await timed.goto(base);
-  await timed.locator('[data-attention-id]').first().waitFor();
+  await openFirstRequest(timed);
   await timed.getByRole('link', { name: 'View project', exact: true }).first().focus();
   const originalFocus = await timed.evaluate(() => document.activeElement?.id);
   await timed.clock.runFor(60_001);
@@ -154,7 +159,7 @@ try {
   await timed.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' }); document.dispatchEvent(new Event('visibilitychange')); });
   await returned;
   assert.equal(reads, 3, 'return refreshes once');
-  await timed.getByRole('link', { name: 'Project details and setup', exact: true }).click();
+  await timed.getByRole('link', { name: 'View project', exact: true }).click();
   await timed.getByRole('button', { name: 'Choose/update next action', exact: true }).click();
   const timedDraft = timed.getByRole('textbox', { name: 'Choose/update next action', exact: true });
   await timedDraft.fill('Synthetic background-safe draft');
@@ -169,7 +174,7 @@ try {
   // Explicit editing survives refresh, rejection and timeout; only acknowledged saves close it.
   const editingPage = await context.newPage();
   await editingPage.goto(base);
-  await editingPage.getByRole('link', { name: 'Project details and setup', exact: true }).click();
+  await openProject(editingPage);
   const chosenUrl = editingPage.url();
   const actionControl = editingPage.getByRole('button', { name: 'Choose/update next action', exact: true });
   await actionControl.click();
@@ -200,14 +205,14 @@ try {
   await editingPage.route('**/api/refresh', (route) => route.fulfill({ status: 503, body: '{}' }));
   await save.click();
   await actionControl.waitFor();
-  assert.match(await actionControl.textContent(), /Synthetic acknowledged action/);
+  assert.match(await editingPage.locator('.project-next-action').textContent(), /Synthetic acknowledged action/);
   await editingPage.getByRole('button', { name: 'Retry', exact: true }).waitFor();
   assert.equal(await actionDraft.count(), 0, 'refresh failure must not undo acknowledged save');
-  await editingPage.getByRole('link', { name: 'Decisions', exact: true }).click();
+  await navigate(editingPage, 'Inbox');
   // Notes remain editable/copyable in project details, not promoted to Home's milestone.
-  await editingPage.getByRole('link', { name: 'Project details and setup', exact: true }).click();
+  await openProject(editingPage);
   await actionControl.waitFor();
-  assert.match(await actionControl.textContent(), /Synthetic acknowledged action/);
+  assert.match(await editingPage.locator('.project-next-action').textContent(), /Synthetic acknowledged action/);
   await editingPage.getByRole('button', { name: 'Copy project notes (context only)', exact: true }).click();
   const brief = editingPage.getByLabel('Copy project notes (context only): selectable text');
   await brief.waitFor();
@@ -218,7 +223,11 @@ try {
   await actionControl.click();
   await actionDraft.fill('Draft must not leak to another project');
   const otherProjectLink = editingPage.getByRole('link', { name: /^Synthetic project/ }).last();
-  const otherProjectName = await otherProjectLink.textContent();
+  const otherProjectName = await otherProjectLink.getAttribute('aria-label');
+  editingPage.once('dialog', dialog => dialog.dismiss());
+  await otherProjectLink.click();
+  assert.equal(await actionDraft.inputValue(), 'Draft must not leak to another project', 'Cancel navigation retains draft');
+  editingPage.once('dialog', dialog => dialog.accept());
   await otherProjectLink.click();
   await editingPage.getByRole('region', { name: `Project details: ${otherProjectName}`, exact: true }).waitFor();
   assert.equal(await actionDraft.count(), 0, 'navigation discards only the previous project draft');

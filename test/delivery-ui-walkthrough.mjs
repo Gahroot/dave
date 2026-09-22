@@ -1,8 +1,8 @@
 // Run after npm run build and test/delivery-ui-fixture.ts. Synthetic port only.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? '/Applications/EZ Coder.app/Contents/Resources/sidecar/node_modules/playwright/index.mjs');
-const browser = await chromium.launch({ headless: true });
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
+const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE });
 const out = '.ezcoder/screenshots/step12'; fs.mkdirSync(out, { recursive: true });
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 const page = await context.newPage(); page.setDefaultTimeout(10000);
@@ -12,7 +12,7 @@ page.on('request', r => { assert.equal(new URL(r.url()).port, '4320', 'isolated 
 page.on('response', async r => { if (r.url().includes('/api/providers')) responses.push(await r.text().catch(() => '')); });
 await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => { if (window.denyClipboard) throw Error('synthetic denial'); window.syntheticClipboard = text; } } }));
 const button = name => page.getByRole('button', { name, exact: true });
-async function keyActivate(locator) { await locator.focus(); await page.keyboard.press('Enter'); }
+async function keyActivate(locator) { await locator.waitFor(); await page.waitForFunction(e => !e.disabled, await locator.elementHandle()); await locator.focus(); await page.keyboard.press('Enter'); }
 async function disclosure(text) { const s = page.locator('summary').filter({ hasText: text }); if (!await s.evaluate(e => e.parentElement.open)) await keyActivate(s); }
 async function shot(name) { await page.screenshot({ path: `${out}/${name}.png`, fullPage: true, animations: 'disabled' }); }
 const lum = rgb => rgb.match(/[\d.]+/g).slice(0,3).map(Number).map(v => v/255).map(v => v <= .04045 ? v/12.92 : ((v+.055)/1.055)**2.4).reduce((s,v,i) => s+v*[.2126,.7152,.0722][i],0);
@@ -22,31 +22,39 @@ try {
  await page.getByText('Status: connected', { exact: true }).waitFor();
  await page.getByText('Status: unavailable', { exact: true }).waitFor();
  await shot('connections-connected');
- await keyActivate(button('Disconnect OpenAI')); await page.getByText('Status: disconnected', { exact: true }).waitFor();
+ await keyActivate(button('Disconnect OpenAI')); await page.getByRole('dialog').waitFor(); await shot('disconnect-confirmation'); await keyActivate(button('Keep connection')); await page.getByText('Status: connected', { exact: true }).waitFor(); await keyActivate(button('Disconnect OpenAI')); await keyActivate(button('Confirm disconnect')); await page.getByText('Status: disconnected', { exact: true }).waitFor();
  await keyActivate(button('Connect OpenAI')); await page.getByText(/Sign-in pending/).waitFor(); await shot('connections-pending');
  await page.getByText(/Status: connected · Sign-in success/).waitFor();
  assert.ok(responses.every(s => !s.includes('SYNTHETIC_SECRET_SENTINEL')));
  await keyActivate(page.getByRole('link', { name: 'Choose project goal and planning model', exact: true }));
  await keyActivate(page.getByRole('link', { name: 'Synthetic onboarding', exact: true }));
- await page.getByLabel('Planning provider', { exact: true }).waitFor();
- assert.equal(await page.getByLabel('Planning provider', { exact: true }).inputValue(), 'openai');
- assert.equal(await page.getByLabel('Exact planning model', { exact: true }).inputValue(), 'gpt-6-astra');
- await page.getByLabel('Planning provider', { exact: true }).selectOption('');
- await keyActivate(button('Reload latest saved state')); assert.equal(await page.getByLabel('Planning provider', { exact: true }).inputValue(), '', 'explicit local selection preserved');
- await page.getByLabel('Planning provider', { exact: true }).selectOption('openai'); await page.getByLabel('Exact planning model', { exact: true }).selectOption('gpt-6-astra');
- for (const [label,text] of [['Delivery goal','Daily whole member onboarding'],['Intended user','Synthetic members'],['Target daily workflow','Complete onboarding from first visit through durable completion'],['Current stage and unknowns','Synthetic prototype; no live acceptance']]) { const input = page.getByLabel(label, { exact: true }); await input.focus(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.type(text); }
+ await page.getByRole('tab', { name: 'Delivery', exact: true }).click();
+ await page.getByLabel('Who breaks the work into pieces', { exact: true }).waitFor();
+ assert.equal(await page.getByLabel('Who breaks the work into pieces', { exact: true }).inputValue(), 'openai');
+ assert.equal(await page.getByLabel('Which model', { exact: true }).inputValue(), 'gpt-6-astra');
+ await page.getByLabel('Who breaks the work into pieces', { exact: true }).selectOption('');
+ await keyActivate(button('Reload latest saved state')); assert.equal(await page.getByLabel('Who breaks the work into pieces', { exact: true }).inputValue(), '', 'explicit local selection preserved');
+ await page.getByLabel('Who breaks the work into pieces', { exact: true }).selectOption('openai'); await page.getByLabel('Which model', { exact: true }).selectOption('gpt-6-astra');
+ for (const [label,text] of [['What are you trying to build','Daily whole member onboarding'],['Who uses it','Synthetic members'],['What they do with it day to day','Complete onboarding from first visit through durable completion'],['Where it is now, and what you are unsure about','Synthetic prototype; no live acceptance']]) { const input = page.getByLabel(label, { exact: true }); await input.focus(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.type(text); }
+ // Leaving for provider recovery retains the same in-memory project draft.
+ await page.getByRole('link', { name: 'Set up or repair provider connection', exact: true }).click();
+ await page.getByRole('link', { name: 'Return to setup', exact: true }).click();
+ assert.equal(await page.getByLabel('Who uses it', { exact: true }).inputValue(), 'Synthetic members');
+ await page.getByRole('tab', { name: 'Context', exact: true }).click();
+ await page.getByRole('tab', { name: 'Delivery', exact: true }).click();
+ assert.equal(await page.getByLabel('Who uses it', { exact: true }).inputValue(), 'Synthetic members');
  // Both recoverable server errors and revision conflicts must preserve form drafts.
- for (const status of [503,409]) { await page.route('**/delivery/goal', r => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error: 'Synthetic save conflict; draft retained' }) })); await keyActivate(button('Save delivery settings')); await page.getByRole('alert').waitFor(); assert.equal(await page.getByLabel('Intended user', { exact: true }).inputValue(), 'Synthetic members'); await page.unroute('**/delivery/goal'); }
- await keyActivate(button('Save delivery settings')); await page.getByText('Goal saved. Define a finish line or choose optional model planning.', { exact: true }).waitFor();
- await disclosure('Optional model planning: context and external-send approval');
- await keyActivate(button('Collect local preview')); const packet = JSON.parse(await page.getByLabel('Exact context packet for approval').inputValue()); assert.equal(packet.model, 'gpt-6-astra');
+ for (const status of [503,409]) { await page.route('**/delivery/goal', r => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error: 'Synthetic save conflict; draft retained' }) })); await keyActivate(button('Save delivery settings')); await page.getByRole('alert').waitFor(); assert.equal(await page.getByLabel('Who uses it', { exact: true }).inputValue(), 'Synthetic members'); await page.unroute('**/delivery/goal'); }
+ await keyActivate(button('Save delivery settings')); await page.getByText('Saved. Next, say what finished looks like.', { exact: true }).waitFor();
+ await keyActivate(button('Continue to context'));
+ await keyActivate(button('Collect local preview')); await keyActivate(button('Review and plan')); const packet = JSON.parse(await page.getByLabel('Exact context packet for approval').inputValue()); assert.equal(packet.model, 'gpt-6-astra');
  assert.equal(await button('Generate plan').isDisabled(), true);
  await shot('context-preview');
  const approved = page.waitForRequest(r => r.url().endsWith('/context/approve')); await keyActivate(button('Approve this exact packet for external planning')); assert.equal((await approved).postDataJSON().fingerprint, packet.fingerprint);
  await page.getByText('Exact context approved. Generate or Replan sends it to the selected provider.', { exact: true }).waitFor();
- await disclosure('Optional model planning: context and external-send approval'); await keyActivate(button('Generate plan')); await page.getByText('Planning: pending', { exact: true }).waitFor();
+ await keyActivate(button('Generate plan')); await page.getByText('Planning: pending', { exact: true }).waitFor();
  const posts = mutations.length; let polls = 0; page.on('request', r => { if (r.url().includes('/operations/') && r.method() === 'GET') polls++; });
- await disclosure('Legacy milestone queue and reports');
+ await disclosure('Older milestone queue, from before finish lines');
  await page.getByRole('heading', { name: 'Whole guided member onboarding', exact: true }).waitFor(); assert.ok(polls >= 1); assert.equal(mutations.length, posts, 'pending polling never POSTs');
  await disclosure('Scope, acceptance and prerequisites'); await disclosure('Preview exact EZ Coder task');
  const task = await page.getByLabel('Exact task text', { exact: true }).inputValue(); assert.match(task, /whole/i);
@@ -66,13 +74,13 @@ try {
  await page.unroute('**/delivery/*/complete'); await keyActivate(button('Retry original completion'));
  await page.getByRole('heading',{name:'Staff review and corrections',exact:true}).waitFor(); assert.deepEqual(completionBodies[1],completionBodies[0]);
  await page.waitForFunction(() => document.activeElement?.textContent === 'Staff review and corrections'); await shot('completion-next-focus');
- const url = page.url(); await page.reload(); await disclosure('Legacy milestone queue and reports'); await page.getByRole('heading',{name:'Staff review and corrections',exact:true}).waitFor(); assert.equal(page.url(),url);
+ const url = page.url(); await page.reload(); await disclosure('Older milestone queue, from before finish lines'); await page.getByRole('heading',{name:'Staff review and corrections',exact:true}).waitFor(); assert.equal(page.url(),url);
  await disclosure('Block, reopen, next milestones and history'); await page.getByLabel('Exact prerequisite or reason to reopen').fill('Synthetic owner approval missing'); await keyActivate(button('Block current milestone')); await page.getByText('Status: blocked', { exact:true }).waitFor();
  await page.getByLabel('Exact prerequisite or reason to reopen').fill('Synthetic approval supplied'); await keyActivate(button('Reopen Staff review and corrections')); await page.getByRole('heading',{name:'Staff review and corrections',exact:true}).waitFor();
  const deliveryUrl = mutations.find(u=>u.endsWith('/goal')).replace(/\/goal$/,''); const saved = await page.evaluate(async url => (await fetch(url)).json(), deliveryUrl); assert.equal(saved.state.history.filter(e=>e.kind==='complete').length,1); assert.ok(saved.state.history.some(e=>e.kind==='block')); assert.ok(saved.state.history.some(e=>e.kind==='reopen'));
  await shot('history');
  await page.emulateMedia({ colorScheme:'dark', reducedMotion:'reduce', forcedColors:'none' });
- await page.waitForFunction(() => document.documentElement.getAttribute('data-mantine-color-scheme') === 'dark');
+ await page.waitForFunction(() => document.documentElement.getAttribute('data-mantine-color-scheme') === 'light'); // The approved workbench deliberately keeps one light theme.
  const darkColors = await button('Copy task for EZ Coder').evaluate(e => ({ fg:getComputedStyle(e).color,bg:getComputedStyle(e).backgroundColor }));
  const darkRatio = contrast(darkColors.fg,darkColors.bg); assert.ok(darkRatio >= 4.5);
  await shot('delivery-dark');

@@ -12,17 +12,19 @@ import {
   Tooltip,
 } from "@mantine/core";
 import {
-  IconChevronDown,
-  IconDots,
-  IconEye,
-  IconEyeOff,
-  IconPin,
-  IconPinnedOff,
-} from "@tabler/icons-react";
+  ChevronDown as IconChevronDown,
+  Ellipsis as IconDots,
+  Eye as IconEye,
+  EyeOff as IconEyeOff,
+  Pin as IconPin,
+  PinOff as IconPinnedOff,
+} from "lucide-react";
 import type { PortfolioProject, ProjectSummary } from "../../shared/types.ts";
 import { EvidenceList } from "../components/EvidenceList.tsx";
 import { EditedBadge, PinnedBadge, TechnicalActivityBadge } from "../components/Labels.tsx";
 import { relative } from "../format.ts";
+import { useDraftGuard } from "../hooks/useDraftGuard.ts";
+import { parseRoute } from "../navigation.ts";
 
 const QUESTIONS = [
   { key: "recentFocus", label: "Most recently worked on" },
@@ -48,7 +50,9 @@ export function ProjectCard({
   onOverride,
   onCorrect,
   busy,
+  section = "overview",
 }: {
+  section?: "overview" | "context";
   project: PortfolioProject;
   onOverride: (id: string, next: { pinned?: boolean; hidden?: boolean }) => void;
   onCorrect: (id: string, field: string, value: string) => Promise<ProjectSummary | null>;
@@ -60,6 +64,7 @@ export function ProjectCard({
   const s = p.summary;
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  useDraftGuard(editing !== null, hash => { const destination = parseRoute(hash); const route = destination.destination === "connections" && destination.returnTo ? parseRoute(destination.returnTo) : destination; return route.destination === "projects" && route.id === p.id; });
 
   return (
     <Card withBorder radius="md" padding="md">
@@ -67,7 +72,7 @@ export function ProjectCard({
         <Group justify="space-between" wrap="wrap" align="flex-start">
           <Stack gap={2}>
             <Group gap="xs">
-              <Text fw={600}>{p.name}</Text>
+              <Text fw={500}>{section === "context" ? "Source details" : "Project notes"}</Text>
               {p.override.pinned && <PinnedBadge />}
               {s.edited && <EditedBadge />}
               {!p.exists && (
@@ -78,7 +83,7 @@ export function ProjectCard({
                 </Tooltip>
               )}
             </Group>
-            <Text size="xs" c="dimmed">
+            <Text size="xs" c="dimmed" hidden={section !== "context"}>
               {p.canonicalPath}
             </Text>
           </Stack>
@@ -105,12 +110,12 @@ export function ProjectCard({
           </Menu>
         </Group>
 
-        <Stack gap="sm">
-          {QUESTIONS.map(({ key, label }) => {
+        <Stack gap="sm" hidden={section !== "overview"}>
+          {[...QUESTIONS].sort((a, b) => Number(b.key === "suggestedNextAction") - Number(a.key === "suggestedNextAction")).map(({ key, label }) => {
             const value = s[key];
             const action = key === "suggestedNextAction";
             const controlLabel = action ? "Choose/update next action" : `Correct ${label}`;
-            return <Stack key={key} gap={4}>
+            return <Stack key={key} gap={4} className={action ? "project-next-action" : "project-note"}>
               <Text size="xs" c="dimmed">{action ? (s.edited && s.nextActionEditedAt && Number.isFinite(Date.parse(s.nextActionEditedAt)) && value?.trim() ? "Chosen next action" : "Suggested next action") : label}</Text>
               {editing === key ? <Stack gap="xs" data-summary-editing>
                 <Textarea aria-label={controlLabel} autoFocus autosize maxLength={400} value={draft} disabled={isSaving || busy}
@@ -129,25 +134,22 @@ export function ProjectCard({
                   }}>Save</Button>
                   <Button variant="default" disabled={isSaving || busy} onClick={() => { setEditing(null); setDraft(""); setSaveError(null); }}>Cancel</Button>
                 </Group>
-              </Stack> : <Button variant="subtle" color="gray" size="sm" disabled={editing !== null || busy}
-                styles={{ root: { height: "auto", minHeight: 32, textAlign: "start" }, label: { whiteSpace: "normal", overflowWrap: "anywhere" } }}
+              </Stack> : <Group align="flex-start" gap="sm" wrap="nowrap"><Text flex={1} size="sm" fw={action ? 500 : 400}>{value || "Not provided"}</Text><Button variant="subtle" color="dark" size="compact-sm" disabled={editing !== null || busy}
                 aria-label={action ? controlLabel : `${controlLabel}: ${value ?? "Not provided"}`}
-                onClick={() => { setEditing(key); setDraft(value ?? ""); setSaveError(null); }}>
-                {action ? `${controlLabel}: ${value ?? "Not provided"}` : value ?? "Not provided — add context"}
-              </Button>}
+                onClick={() => { setEditing(key); setDraft(value ?? ""); setSaveError(null); }}>Edit</Button></Group>}
             </Stack>;
           })}
           {s.nextActionEditedAt && Number.isFinite(Date.parse(s.nextActionEditedAt)) && <Text size="xs" c="dimmed">Action saved {new Date(s.nextActionEditedAt).toLocaleString()}</Text>}
         </Stack>
 
-        <Group gap="xs" wrap="wrap">
+        <Group gap="xs" wrap="wrap" hidden={section !== "context"}>
           <Text size="xs" c="dimmed" flex={1}>
             {activityLine(p)}
           </Text>
           <TechnicalActivityBadge detail={p.relevance.reasons.map((r) => r.detail).join(" · ")} />
         </Group>
 
-        {s.evidence.length > 0 && (
+        {section === "context" && s.evidence.length > 0 && (
           <>
             <Button
               variant="default"

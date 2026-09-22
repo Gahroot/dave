@@ -1,5 +1,5 @@
 import { Badge, Tooltip } from "@mantine/core";
-import { IconClockExclamation } from "@tabler/icons-react";
+import { ClockAlert as IconClockExclamation } from "lucide-react";
 
 export function StaleBadge({ label, why }: { label: string; why: string }) {
   return (

@@ -1,5 +1,5 @@
 import { Badge, Tooltip } from "@mantine/core";
-import { IconBulb, IconPencil, IconPin, IconTerminal2 } from "@tabler/icons-react";
+import { Lightbulb as IconBulb, Pencil as IconPencil, Pin as IconPin, Terminal as IconTerminal2 } from "lucide-react";
 
 /**
  * Ordinary git and session activity. Deliberately never called progress: it

@@ -3,6 +3,7 @@ import type { Db } from "./index.ts";
 import { deliveryRepo, DeliveryError } from "./delivery-repo.ts";
 import { coordinationText, parseEvidenceResult, parseFinishContract, type CoordinationState, type DeliveryHandoff } from "../model/delivery-coordination.ts";
 import { deriveDeliveryProgress, reportFailures, semanticGoal } from "../model/delivery-progress.ts";
+import { buildDeliveryQueue, WIP_LIMIT, type QueueInput } from "../model/delivery-queue.ts";
 import { parseDeliveryPlan, type DeliveryState } from "../model/delivery-schema.ts";
 import { contextTextSafe } from "../model/delivery-context.ts";
 
@@ -16,10 +17,10 @@ export function deliveryCoordinationRepo(db: Db) {
       contract: row ? { ...parseFinishContract(JSON.parse(row.definition_json)), id: row.id, goalHash: row.goal_hash } : null,
       goalMatches: !row || row.goal_hash === hashGoal(state),
       resolutions: row ? JSON.parse(row.resolutions_json) as Record<string, string> : {},
-      handoffs: (db.prepare("SELECT id,plan_id,milestone_id,contract_id,criteria_json FROM delivery_handoffs WHERE project_id=? AND active=1 ORDER BY rowid").all(state.projectId) as { id: string; plan_id: string; milestone_id: string; contract_id: string; criteria_json: string }[]).map(h => ({ id: h.id, planId: h.plan_id, milestoneId: h.milestone_id, contractId: h.contract_id, criteria: JSON.parse(h.criteria_json) as DeliveryHandoff["criteria"] })),
+      handoffs: (db.prepare("SELECT id,plan_id,milestone_id,contract_id,criteria_json,created_at FROM delivery_handoffs WHERE project_id=? AND active=1 ORDER BY rowid").all(state.projectId) as { id: string; plan_id: string; milestone_id: string; contract_id: string; criteria_json: string; created_at: string | null }[]).map(h => ({ id: h.id, planId: h.plan_id, milestoneId: h.milestone_id, contractId: h.contract_id, criteria: JSON.parse(h.criteria_json) as DeliveryHandoff["criteria"], createdAt: h.created_at })),
       reports: (db.prepare("SELECT id,handoff_id,report_json,created_at FROM delivery_reports WHERE project_id=? ORDER BY rowid").all(state.projectId) as { id: string; handoff_id: string; report_json: string; created_at: string }[]).map(r => ({ id: r.id, handoffId: r.handoff_id, report: JSON.parse(r.report_json), createdAt: r.created_at })),
       decisions: (db.prepare("SELECT id,milestone_id,report_id,action,reason,created_at FROM delivery_reviews WHERE project_id=? ORDER BY rowid").all(state.projectId) as { id: string; milestone_id: string; report_id: string | null; action: "accept" | "return"; reason: string; created_at: string }[]).map(d => ({ id: d.id, milestoneId: d.milestone_id, reportId: d.report_id, action: d.action, reason: d.reason, createdAt: d.created_at })),
-      focusProjectId: (db.prepare("SELECT project_id FROM delivery_focus WHERE singleton=1").get() as { project_id: string } | undefined)?.project_id ?? null,
+      engagement: (db.prepare("SELECT state FROM delivery_engagements WHERE project_id=?").get(state.projectId) as { state: "active" | "paused" } | undefined)?.state ?? null,
     };
   }
   function snapshot(projectId: string) {
@@ -43,6 +44,13 @@ export function deliveryCoordinationRepo(db: Db) {
     } catch (error) { db.exec("ROLLBACK"); throw error; }
     return snapshot(projectId);
   }
+  /** Records what was assigned and when, so silence becomes measurable. */
+  function issue(state: DeliveryState, data: CoordinationState, milestone: { id: string; position: number; acceptance: string[] }) {
+    const contract = data.contract!;
+    const criteria = milestone.acceptance.map((text, i) => ({ id: `m${i}`, text }));
+    contract.criteria.forEach((c, i) => { if (c.milestones.includes(milestone.position)) criteria.push({ id: `c${i}`, text: c.text }); });
+    db.prepare("INSERT INTO delivery_handoffs(id,project_id,plan_id,milestone_id,contract_id,criteria_json,created_at) VALUES (?,?,?,?,?,?,?)").run(randomUUID(), state.projectId, state.currentPlanId!, milestone.id, contract.id, JSON.stringify(criteria), new Date().toISOString());
+  }
   function invalidate(state: DeliveryState, milestoneId?: string) {
     const plan = state.plans.find(p => p.id === state.currentPlanId);
     const positions = new Set<number>();
@@ -56,9 +64,27 @@ export function deliveryCoordinationRepo(db: Db) {
   }
   return {
     read: snapshot,
-    focus(projectId: string, revision: number) { return change(projectId, revision, () => {
-      db.prepare("INSERT INTO delivery_focus(singleton,project_id) VALUES (1,?) ON CONFLICT(singleton) DO UPDATE SET project_id=excluded.project_id").run(projectId);
+    /**
+     * Taking on work is capped, and the cap is the point: three at a time is what makes
+     * the fourth get finished instead of started. Pausing is always allowed.
+     */
+    engage(projectId: string, revision: number, next: "active" | "paused") { return change(projectId, revision, () => {
+      if (next !== "active" && next !== "paused") invalid("Unknown engagement state");
+      if (next === "active") {
+        const active = (db.prepare("SELECT COUNT(*) AS n FROM delivery_engagements WHERE state='active' AND project_id!=?").get(projectId) as { n: number }).n;
+        if (active >= WIP_LIMIT) invalid(`You already have ${WIP_LIMIT} projects on the go. Pause one before starting another.`);
+      }
+      db.prepare("INSERT INTO delivery_engagements(project_id,state,started_at) VALUES (?,?,?) ON CONFLICT(project_id) DO UPDATE SET state=excluded.state").run(projectId, next, new Date().toISOString());
     }); },
+    /** One deterministic next action per engaged project; no model call, no heuristics. */
+    queue() {
+      const rows = db.prepare("SELECT e.project_id AS projectId,e.state,e.started_at AS startedAt,p.name AS projectName FROM delivery_engagements e JOIN projects p ON p.id=e.project_id LEFT JOIN project_overrides o ON o.project_id=e.project_id WHERE COALESCE(o.hidden,0)=0").all() as { projectId: string; state: "active" | "paused"; startedAt: string; projectName: string }[];
+      // One unreadable project must never hide the rest of your delivery list.
+      return buildDeliveryQueue(rows.map((row): QueueInput => {
+        try { const { state, coordination } = snapshot(row.projectId); return { ...row, delivery: state, coordination }; }
+        catch { return { ...row, unreadable: true }; }
+      }));
+    },
     saveContract(projectId: string, revision: number, value: unknown) {
       const contract = parseFinishContract(value);
       return change(projectId, revision, state => {
@@ -91,10 +117,23 @@ export function deliveryCoordinationRepo(db: Db) {
         const progress = deriveDeliveryProgress(state, data), item = progress.milestones.find(m => m.milestone.id === milestoneId);
         if (!item || progress.stale || !["ready", "handed-off"].includes(item.status)) invalid("Milestone is not eligible for a handoff");
         if (item!.handoff) return;
-        const contract = data.contract!;
-        const criteria = item!.milestone.acceptance.map((text, i) => ({ id: `m${i}`, text }));
-        contract.criteria.forEach((c, i) => { if (c.milestones.includes(item!.milestone.position)) criteria.push({ id: `c${i}`, text: c.text }); });
-        db.prepare("INSERT INTO delivery_handoffs(id,project_id,plan_id,milestone_id,contract_id,criteria_json) VALUES (?,?,?,?,?,?)").run(randomUUID(), projectId, state.currentPlanId!, milestoneId, contract.id, JSON.stringify(criteria));
+        issue(state, data, item!.milestone);
+      });
+    },
+    /**
+     * For work that was sent off and never came back. It is not a retry of rejected
+     * work, so it deliberately does not count towards the three-strikes limit: nothing
+     * was ever delivered to reject. Cancelling is always offered beside it, and each
+     * send restarts a two-day clock, so this cannot spin without a person choosing it.
+     */
+    resend(projectId: string, revision: number, milestoneId: string, reason: string) {
+      coordinationText(reason);
+      return change(projectId, revision, (state, data) => {
+        const progress = deriveDeliveryProgress(state, data), item = progress.milestones.find(m => m.milestone.id === milestoneId);
+        if (!item || progress.stale || item.status !== "handed-off" || item.report) invalid("Only work that was sent off and never came back can be sent again");
+        db.prepare("UPDATE delivery_handoffs SET active=0 WHERE project_id=? AND milestone_id=? AND active=1").run(projectId, milestoneId);
+        db.prepare("INSERT INTO delivery_reviews(id,project_id,plan_id,milestone_id,report_id,action,reason,created_at) VALUES (?,?,?,?,NULL,'return',?,?)").run(randomUUID(), projectId, state.currentPlanId!, milestoneId, reason, new Date().toISOString());
+        issue(state, data, item!.milestone);
       });
     },
     submit(projectId: string, revision: number, key: string, value: unknown) {
