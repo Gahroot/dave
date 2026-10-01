@@ -39,7 +39,7 @@ describe('Dave-owned OpenAI auth (synthetic credentials and ephemeral listeners 
     expect(await auth.connect()).toEqual({ provider: 'openai', storage: 'session', state: 'connected' });
     const url = new URL(launch);
     expect(url.origin + url.pathname).toBe('https://auth.openai.com/oauth/authorize');
-    expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
+    expect(url.searchParams.get('scope')).toBe('openid profile email offline_access api.connectors.read api.connectors.invoke');
     const [endpoint, init] = network.mock.calls[0]!;
     expect(endpoint).toBe('https://auth.openai.com/oauth/token');
     expect(init?.redirect).toBe('error');
@@ -68,6 +68,16 @@ describe('Dave-owned OpenAI auth (synthetic credentials and ephemeral listeners 
       expect(await callback(url)).toBe(200);
     } });
     await auth.connect(); expect(network).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts the real OpenAI callback shape, which includes scope', async () => {
+    const { auth, network } = setup({ openBrowser: async url => {
+      const state = new URL(url).searchParams.get('state')!;
+      const query = `code=ac_R32saAhtuu1EobFl.qTjIADQFgEJh82MqC--lnrp&scope=openid+profile+email+offline_access&state=${state}`;
+      expect(await callback(url, query)).toBe(200);
+    } });
+    expect((await auth.connect()).state).toBe('connected');
+    expect((network.mock.calls[0]![1]!.body as URLSearchParams).get('code')).toBe('ac_R32saAhtuu1EobFl.qTjIADQFgEJh82MqC--lnrp');
   });
 
   it.each(['access_denied', 'server_error'])('handles provider %s without exchanging or reflecting details', async error => {
@@ -134,8 +144,26 @@ describe('Dave-owned OpenAI auth (synthetic credentials and ephemeral listeners 
     expect(auth.status().state).toBe('reconnect_required');
   });
 
+  it.each([
+    { id_token: 'header.payload.signature', scope: 'openid profile email offline_access', unexpected: 'value' },
+    { expires_in: '3600' },
+    { token_type: 'bearer' },
+  ])('accepts real-world token response variations: %j', async extra => {
+    const storage = store(saved());
+    const { auth } = setup({ store: storage, fetch: async () => response(tokens(extra)), now: () => 0 });
+    await expect(auth.getCredentials()).resolves.toMatchObject({ accountId: 'account_test', expiresAt: 3_600_000 });
+    expect(JSON.parse(storage.read()!)).not.toHaveProperty('unexpected');
+  });
+
+  it('falls back to the access token expiry when expires_in is missing', async () => {
+    const access = `header.${Buffer.from(JSON.stringify({ exp: 7200, 'https://api.openai.com/auth': { chatgpt_account_id: 'account_test' } })).toString('base64url')}.signature`;
+    const { expires_in: _omit, ...withoutExpiry } = tokens({ access_token: access });
+    const { auth } = setup({ store: store(saved()), fetch: async () => response(withoutExpiry), now: () => 0 });
+    await expect(auth.getCredentials()).resolves.toMatchObject({ expiresAt: 7_200_000 });
+  });
+
   it.each([{ access_token: 'not-jwt' }, { access_token: jwt('bad/id') }, { refresh_token: '' }, { expires_in: -1 },
-    { expires_in: '3600' }, { token_type: 'Basic' }, { unexpected: 'value' }, { access_token: jwt('different_account') }])('rejects malformed tokens or changed account: %j', async extra => {
+    { expires_in: 'soon' }, { token_type: 'Basic' }, { access_token: jwt('different_account') }])('rejects malformed tokens or changed account: %j', async extra => {
     const storage = store(saved());
     const { auth } = setup({ store: storage, fetch: async () => response(tokens(extra)) });
     await expect(auth.getCredentials()).rejects.toMatchObject({ code: 'invalid_response' });
@@ -156,6 +184,19 @@ describe('Dave-owned OpenAI auth (synthetic credentials and ephemeral listeners 
       await expect(auth.getCredentials()).rejects.toBeInstanceOf(Error);
       expect(JSON.stringify(auth.status())).not.toContain('token_private'); expect(storage.read()).toBe(saved());
     }
+  });
+
+  it('logs an oversized token response without leaking its contents', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const storage = store(saved());
+      const { auth } = setup({ store: storage, fetch: async () => response({ access_token: 'token_private', huge: 'x'.repeat(70_000) }) });
+      await expect(auth.getCredentials()).rejects.toMatchObject({ code: 'invalid_response' });
+      const lines = warn.mock.calls.map(call => String(call[0]));
+      expect(lines.map(line => JSON.parse(line))).toContainEqual({ event: 'openai_token_rejected', reason: 'response_too_large', grant: 'refresh_token', status: 200, keys: [] });
+      expect(lines.join('\n')).not.toContain('token_private');
+      expect(storage.read()).toBe(saved());
+    } finally { warn.mockRestore(); }
   });
 
   it('fails closed on storage failure, with session-only explicitly selected and no native operations', async () => {

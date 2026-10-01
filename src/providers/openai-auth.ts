@@ -50,30 +50,60 @@ function object(value: unknown): value is Record<string, unknown> {
 function secret(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 16_384 && /^[\x21-\x7e]+$/.test(value);
 }
-function accountId(token: string): string {
+function jwtPayload(token: string): Record<string, unknown> {
   const parts = token.split('.');
   if (parts.length !== 3 || parts.some(part => !/^[A-Za-z0-9_-]+$/.test(part))) throw failure('invalid_response');
+  // This is routing metadata from the fixed TLS token endpoint, not local JWT authentication.
+  const payload: unknown = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'));
+  if (!object(payload)) throw failure('invalid_response');
+  return payload;
+}
+function accountId(token: string): string {
   try {
-    // This is routing metadata from the fixed TLS token endpoint, not local JWT authentication.
-    const payload: unknown = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'));
-    const claim = object(payload) ? payload['https://api.openai.com/auth'] : null;
+    const payload = jwtPayload(token);
+    const claim = payload['https://api.openai.com/auth'];
     const id = object(claim) ? claim.chatgpt_account_id : null;
     if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw failure('invalid_response');
     return id;
   } catch { throw failure('invalid_response'); }
 }
+const MAX_LIFETIME_S = 31_536_000;
+/** Lifetime in seconds: `expires_in` when usable, else the access token's own `exp` claim. */
+function lifetime(data: Record<string, unknown>, accessToken: string, now: number): number | null {
+  const declared = typeof data.expires_in === 'string' && /^\d{1,9}$/.test(data.expires_in) ? Number(data.expires_in) : data.expires_in;
+  if (typeof declared === 'number' && Number.isFinite(declared) && declared >= 1 && declared <= MAX_LIFETIME_S) return Math.floor(declared);
+  if (declared !== undefined && declared !== null) return null;
+  try {
+    const exp = jwtPayload(accessToken).exp;
+    const remaining = typeof exp === 'number' ? Math.floor(exp - now / 1000) : NaN;
+    return remaining >= 1 && remaining <= MAX_LIFETIME_S ? remaining : null;
+  } catch { return null; }
+}
+/** Which check rejected a token response. Field names only, never values. */
+function tokenProblem(data: unknown, now: number): string | null {
+  if (!object(data)) return 'not_object';
+  if (!secret(data.access_token)) return 'access_token';
+  if (!secret(data.refresh_token)) return 'refresh_token';
+  if (lifetime(data, data.access_token, now) === null) return 'expires_in';
+  if (data.token_type !== undefined && (typeof data.token_type !== 'string' || data.token_type.toLowerCase() !== 'bearer')) return 'token_type';
+  return null;
+}
+// Like EZ Coder, read only the fields Dave needs and ignore any others OpenAI adds
+// (id_token, scope and so on). Nothing beyond these is stored.
 function tokenCredentials(data: unknown, now: number): StoredCredentials {
-  const allowed = ['access_token', 'refresh_token', 'expires_in', 'token_type', 'id_token', 'scope'];
-  if (!object(data) || Object.keys(data).some(key => !allowed.includes(key)) ||
-    !secret(data.access_token) || !secret(data.refresh_token) ||
-    !Number.isSafeInteger(data.expires_in) || (data.expires_in as number) < 1 || (data.expires_in as number) > 31_536_000 ||
-    (data.token_type !== undefined && data.token_type !== 'Bearer' && data.token_type !== 'bearer') ||
-    (data.id_token !== undefined && !secret(data.id_token)) ||
-    (data.scope !== undefined && (typeof data.scope !== 'string' || data.scope.length > 2048 || !/^[\x20-\x7e]*$/.test(data.scope)))) {
+  const problem = tokenProblem(data, now);
+  if (problem || !object(data) || !secret(data.access_token) || !secret(data.refresh_token)) {
+    const keys = object(data) ? Object.keys(data).sort() : [];
+    console.warn(JSON.stringify({ event: 'openai_token_rejected', reason: problem ?? 'unknown', keys }));
     throw failure('invalid_response');
   }
-  return { accessToken: data.access_token, refreshToken: data.refresh_token,
-    expiresAt: now + (data.expires_in as number) * 1000, accountId: accountId(data.access_token) };
+  const seconds = lifetime(data, data.access_token, now) ?? 0;
+  let id: string;
+  try { id = accountId(data.access_token); } catch (error) {
+    console.warn(JSON.stringify({ event: 'openai_token_rejected', reason: 'account_id', keys: Object.keys(data).sort() }));
+    throw error;
+  }
+  return { accessToken: data.access_token, refreshToken: data.refresh_token, expiresAt: now + seconds * 1000, accountId: id };
 }
 function parseStored(raw: string): StoredCredentials {
   try {
@@ -221,7 +251,9 @@ export class OpenAIAuth {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
         body: new URLSearchParams({ client_id: CLIENT_ID, ...fields }),
       }), signal);
-      if (!response.body || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) {
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!response.body || !/^application\/json(?:\s*;|$)/i.test(contentType)) {
+        console.warn(JSON.stringify({ event: 'openai_token_rejected', reason: 'content_type', grant: fields.grant_type, status: response.status, contentType: contentType.slice(0, 100) }));
         void response.body?.cancel().catch(() => {});
         throw failure('invalid_response');
       }
@@ -233,7 +265,11 @@ export class OpenAIAuth {
           const { value, done } = await bounded(reader.read(), signal);
           if (done) break;
           size += value.byteLength;
-          if (size > RESPONSE_LIMIT) throw failure('invalid_response');
+          if (size > RESPONSE_LIMIT) {
+            // The body is unparsed at this point, so there are no field names to report.
+            console.warn(JSON.stringify({ event: 'openai_token_rejected', reason: 'response_too_large', grant: fields.grant_type, status: response.status, keys: [] }));
+            throw failure('invalid_response');
+          }
           chunks.push(value);
         }
       } finally { void reader.cancel().catch(() => {}); reader.releaseLock(); }
@@ -241,6 +277,9 @@ export class OpenAIAuth {
       let data: unknown;
       try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw failure('invalid_response'); }
       if (!response.ok) {
+        // OAuth error codes are fixed vocabulary, not secrets; descriptions are not logged.
+        const oauthError = object(data) && typeof data.error === 'string' ? data.error.slice(0, 64) : null;
+        console.warn(JSON.stringify({ event: 'openai_token_failed', grant: fields.grant_type, status: response.status, error: oauthError }));
         if (response.status === 400 && object(data) && data.error === 'invalid_grant') throw failure('reconnect_required');
         throw failure('network_error');
       }
@@ -276,7 +315,8 @@ export class OpenAIAuth {
           !req.url || req.url.length > 8192 || !req.url.startsWith('/auth/callback?')) { rejectRequest(); return; }
         const url = new URL(req.url, `http://${host}`);
         const params = url.searchParams;
-        const allowed = ['state', 'code', 'error', 'error_description', 'error_uri'];
+        // OpenAI's real redirect appends `scope` alongside `code` and `state`.
+        const allowed = ['state', 'code', 'scope', 'error', 'error_description', 'error_uri'];
         const receivedState = params.get('state') ?? '';
         if (url.pathname !== '/auth/callback' || url.hash || [...params.keys()].some(key => !allowed.includes(key) || params.getAll(key).length !== 1) ||
           !/^[A-Za-z0-9_-]{43}$/.test(receivedState) || !timingSafeEqual(Buffer.from(receivedState), Buffer.from(state)) ||
@@ -303,7 +343,7 @@ export class OpenAIAuth {
         redirect = `http://${host}/auth/callback`;
         const url = new URL(AUTHORIZE_URL);
         url.search = new URLSearchParams({ response_type: 'code', client_id: CLIENT_ID, redirect_uri: redirect,
-          scope: 'openid profile email offline_access', code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+          scope: 'openid profile email offline_access api.connectors.read api.connectors.invoke', code_challenge: createHash('sha256').update(verifier).digest('base64url'),
           code_challenge_method: 'S256', state, prompt: 'login', id_token_add_organizations: 'true',
           codex_cli_simplified_flow: 'true', originator: 'dave' }).toString();
         Promise.resolve().then(() => {
