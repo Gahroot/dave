@@ -3,6 +3,8 @@
 Open one ranked decision queue, find the project context, and remember what you
 handled. No setup forms, model calls, agent installation or business metadata.
 It reads existing EZBoss, EZCoder, pew2 and Git evidence. A quiet queue is valid.
+The opt-in extras below (delivery planning, Agent desk, Fathom meetings) change this
+only after you connect them.
 
 ## Run it
 
@@ -87,6 +89,39 @@ backups cover pre-upgrade committed state on this machine, not off-device disast
 recovery. Workspaces are retained; disk usage requires operator management.
 
 Implementation plan and provenance: [docs/agent-platform-plan.md](docs/agent-platform-plan.md).
+
+## Fathom meetings (optional)
+
+Connect Fathom in **Connections** to track what you promised clients and what they
+asked for. Nothing happens until you add a key; nothing is sent to a model until you
+turn analysis on.
+
+- **Import.** Every 5 minutes DAVE lists meetings *you* recorded (`recorded_by` your
+  Fathom email) and fetches each transcript, at most 4 a minute. It never requests
+  Fathom's own summaries or action items. The first sync imports 7, 30 or 90 days.
+  Delivery is polling only: DAVE listens on your machine, so no webhook is used.
+- **Key.** Stored in the macOS Keychain (`com.dave.meetings.fathom`), never in the
+  database, logs, responses or git. Fixed `https://api.fathom.ai/external/v1` URLs,
+  15 s timeout, 5 MB response cap, no redirects, digits-only recording ids.
+- **Analysis (opt-in).** With the switch on, DAVE sends each new transcript (names
+  and roles, no emails) plus your project names and open promises to your OpenAI
+  connection, with its own prompt and your editable reading instructions. The switch
+  shows exactly what is sent; changing that text asks for consent again. While off,
+  meetings are imported but not analyzed, and you can analyze one at a time.
+- **Checks.** Every item needs a verbatim quote found near its timestamp, promises
+  must be spoken by you and client asks by an external attendee, projects are
+  referenced by handles DAVE maps back, and dates must be plausible. Failing items
+  are dropped and counted.
+- **Promises.** Open, overdue, due soon, or "not followed up" (7+ days, no work on
+  the project since). Evidence (a later meeting, commits, accepted Agent desk runs,
+  finished milestones, done EZBoss tasks) only moves a promise to **Looks done?**;
+  you confirm. The 6-hourly follow-up check uses the model only with the switch on.
+- **Where it shows.** Inbox and Today (promises 60 to 90, client ideas 45), the
+  **Meetings** page, and a "From meetings" panel on each project's Work tab. A client
+  pain point's feature idea can open an editable Agent desk draft; you start it.
+- **Forget and disconnect.** "Forget meeting" deletes its transcript and items and
+  prevents re-import. Disconnect removes the key and can keep or delete meetings.
+  Transcripts stay in `pcc.db` (and its migration backups) on this Mac.
 
 ## Bounded delivery coordination (optional)
 
@@ -253,7 +288,9 @@ checks every argv and a read spy checks no deny-listed file and nothing in
 
 ## Storage and migration protection
 
-Schema v4 adds attention columns without rebuilding v3 tables or changing existing
+Schema v10 adds the meeting tables additively; a pre-v10 DAVE refuses the upgraded
+store, and the automatic `backups/v9-*.db` copy is the way back. Schema v4 adds
+attention columns without rebuilding v3 tables or changing existing
 IDs, edits, inbox outcomes or snapshots. Exact legacy evidence can inherit its
 saved outcome; unmapped legacy rows stay in history. Only pre-v3 stores enter the
 old setup-table cleanup. Databases newer than this app are refused.

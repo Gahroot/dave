@@ -1,16 +1,22 @@
-import { Badge, Tooltip } from "@mantine/core";
+import type { ReactNode } from "react";
+import { Tooltip } from "@mantine/core";
 import { Lightbulb as IconBulb, Pencil as IconPencil, Pin as IconPin, Terminal as IconTerminal2 } from "lucide-react";
+
+/** Quiet tag: a colored icon beside neutral text. No tinted fill, so the text keeps full contrast. */
+function QuietTag({ icon, tone, children }: { icon: ReactNode; tone: "blue" | "violet" | "gray" | "green"; children: ReactNode }) {
+  return <span className="quiet-tag"><span className={`status-icon tone-${tone}`} aria-hidden="true">{icon}</span>{children}</span>;
+}
 
 /**
  * Ordinary git and session activity. Deliberately never called progress: it
  * proves files moved, not that the work advanced.
  */
 export function TechnicalActivityBadge({ detail }: { detail?: string }) {
+  const why = detail ?? "Observed machine activity: commits, sessions, task updates";
+  // Focusable so keyboard users can open the explanation; the label carries it for screen readers.
   return (
-    <Tooltip label={detail ?? "Observed machine activity — commits, sessions, task updates"} multiline w={300}>
-      <Badge size="xs" color="gray" variant="outline" leftSection={<IconTerminal2 size={11} />}>
-        Technical activity
-      </Badge>
+    <Tooltip label={why} multiline w={300}>
+      <span tabIndex={0} role="note" aria-label={`Technical activity. ${why}`}><QuietTag tone="gray" icon={<IconTerminal2 size={12} />}>Technical activity</QuietTag></span>
     </Tooltip>
   );
 }
@@ -18,10 +24,8 @@ export function TechnicalActivityBadge({ detail }: { detail?: string }) {
 /** An inferred next step. Shown as a suggestion, never as an instruction. */
 export function SuggestionBadge({ detail }: { detail?: string }) {
   return (
-    <Tooltip label={detail ?? "Inferred from the evidence — a suggestion, not a fact"} multiline w={300}>
-      <Badge size="xs" color="violet" variant="light" leftSection={<IconBulb size={11} />}>
-        Suggestion
-      </Badge>
+    <Tooltip label={detail ?? "Inferred from the evidence: a suggestion, not a fact"} multiline w={300}>
+      <span tabIndex={0} role="note" aria-label={`Suggestion. ${detail ?? "Inferred from the evidence: a suggestion, not a fact"}`}><QuietTag tone="violet" icon={<IconBulb size={12} />}>Suggestion</QuietTag></span>
     </Tooltip>
   );
 }
@@ -29,17 +33,11 @@ export function SuggestionBadge({ detail }: { detail?: string }) {
 export function EditedBadge() {
   return (
     <Tooltip label="You corrected this summary; it will not be overwritten">
-      <Badge size="xs" color="teal" variant="light" leftSection={<IconPencil size={11} />}>
-        Your edit
-      </Badge>
+      <span tabIndex={0} role="note" aria-label="Your edit. You corrected this summary; it will not be overwritten"><QuietTag tone="green" icon={<IconPencil size={12} />}>Your edit</QuietTag></span>
     </Tooltip>
   );
 }
 
 export function PinnedBadge() {
-  return (
-    <Badge size="xs" color="blue" variant="light" leftSection={<IconPin size={11} />}>
-      Pinned
-    </Badge>
-  );
+  return <QuietTag tone="blue" icon={<IconPin size={12} />}>Pinned</QuietTag>;
 }

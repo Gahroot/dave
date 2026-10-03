@@ -12,13 +12,21 @@ import {
   Tooltip,
 } from "@mantine/core";
 import {
+  ArrowRight as IconNext,
   ChevronDown as IconChevronDown,
+  CircleCheck as IconDone,
+  CircleAlert as IconBlocked,
   Ellipsis as IconDots,
   Eye as IconEye,
   EyeOff as IconEyeOff,
+  FolderX as IconMissing,
+  History as IconRecent,
+  Pencil as IconPencil,
   Pin as IconPin,
   PinOff as IconPinnedOff,
+  type LucideIcon,
 } from "lucide-react";
+import type { Tone } from "../status.ts";
 import type { PortfolioProject, ProjectSummary } from "../../shared/types.ts";
 import { EvidenceList } from "../components/EvidenceList.tsx";
 import { EditedBadge, PinnedBadge, TechnicalActivityBadge } from "../components/Labels.tsx";
@@ -32,6 +40,13 @@ const QUESTIONS = [
   { key: "unfinished", label: "Unfinished or blocked" },
   { key: "suggestedNextAction", label: "Next action" },
 ] as const;
+/** One icon per note, colored only when the value says something needs attention. */
+const NOTE_ICON: Record<(typeof QUESTIONS)[number]["key"], { icon: LucideIcon; tone: (value: string | null | undefined) => Tone }> = {
+  suggestedNextAction: { icon: IconNext, tone: () => "blue" },
+  recentFocus: { icon: IconRecent, tone: () => "gray" },
+  completed: { icon: IconDone, tone: value => value?.trim() ? "green" : "gray" },
+  unfinished: { icon: IconBlocked, tone: value => value?.trim() ? "amber" : "gray" },
+};
 
 /** Observed machine facts, phrased as activity rather than progress. */
 function activityLine(p: PortfolioProject): string {
@@ -67,7 +82,7 @@ export function ProjectCard({
   useDraftGuard(editing !== null, hash => { const destination = parseRoute(hash); const route = destination.destination === "connections" && destination.returnTo ? parseRoute(destination.returnTo) : destination; return route.destination === "projects" && route.id === p.id; });
 
   return (
-    <Card withBorder radius="md" padding="md">
+    <Card radius="md" padding={0}>
       <Stack gap="xs">
         <Group justify="space-between" wrap="wrap" align="flex-start">
           <Stack gap={2}>
@@ -77,9 +92,7 @@ export function ProjectCard({
               {s.edited && <EditedBadge />}
               {!p.exists && (
                 <Tooltip label="The directory was not found on disk">
-                  <Text size="xs" c="red">
-                    missing
-                  </Text>
+                  <span className="quiet-tag" tabIndex={0}><span className="status-icon tone-red" aria-hidden="true"><IconMissing size={12} /></span>Folder missing</span>
                 </Tooltip>
               )}
             </Group>
@@ -110,14 +123,16 @@ export function ProjectCard({
           </Menu>
         </Group>
 
-        <Stack gap="sm" hidden={section !== "overview"}>
+        {section === "overview" && <div className="property-list">
           {[...QUESTIONS].sort((a, b) => Number(b.key === "suggestedNextAction") - Number(a.key === "suggestedNextAction")).map(({ key, label }) => {
             const value = s[key];
             const action = key === "suggestedNextAction";
             const controlLabel = action ? "Choose/update next action" : `Correct ${label}`;
-            return <Stack key={key} gap={4} className={action ? "project-next-action" : "project-note"}>
-              <Text size="xs" c="dimmed">{action ? (s.edited && s.nextActionEditedAt && Number.isFinite(Date.parse(s.nextActionEditedAt)) && value?.trim() ? "Chosen next action" : "Suggested next action") : label}</Text>
-              {editing === key ? <Stack gap="xs" data-summary-editing>
+            const Icon = NOTE_ICON[key].icon;
+            return <div key={key} className={`property-row project-note-row ${action ? "project-next-action" : "project-note"}`}>
+              <span className={`status-icon property-icon tone-${NOTE_ICON[key].tone(value)}`} aria-hidden="true"><Icon size={16} /></span>
+              <Text size="sm" className="property-label">{action ? (s.edited && s.nextActionEditedAt && Number.isFinite(Date.parse(s.nextActionEditedAt)) && value?.trim() ? "Chosen next action" : "Suggested next action") : label}</Text>
+              {editing === key ? <Stack gap="xs" data-summary-editing className="property-editor">
                 <Textarea aria-label={controlLabel} autoFocus autosize maxLength={400} value={draft} disabled={isSaving || busy}
                   description={`${draft.length}/400 characters`} onChange={(e) => setDraft(e.currentTarget.value)} />
                 {saveError && <Text role="alert" c="red" size="sm">{saveError}</Text>}
@@ -134,13 +149,13 @@ export function ProjectCard({
                   }}>Save</Button>
                   <Button variant="default" disabled={isSaving || busy} onClick={() => { setEditing(null); setDraft(""); setSaveError(null); }}>Cancel</Button>
                 </Group>
-              </Stack> : <Group align="flex-start" gap="sm" wrap="nowrap"><Text flex={1} size="sm" fw={action ? 500 : 400}>{value || "Not provided"}</Text><Button variant="subtle" color="dark" size="compact-sm" disabled={editing !== null || busy}
+              </Stack> : <><Text size="sm" className={`property-value${value ? "" : " is-empty"}`} fw={action && value ? 600 : 400}>{value || "Not provided"}</Text><Button className="property-action" variant="subtle" color="dark" size="compact-sm" leftSection={<IconPencil size={14} aria-hidden="true" />} disabled={editing !== null || busy}
                 aria-label={action ? controlLabel : `${controlLabel}: ${value ?? "Not provided"}`}
-                onClick={() => { setEditing(key); setDraft(value ?? ""); setSaveError(null); }}>Edit</Button></Group>}
-            </Stack>;
+                onClick={() => { setEditing(key); setDraft(value ?? ""); setSaveError(null); }}>Edit</Button></>}
+            </div>;
           })}
-          {s.nextActionEditedAt && Number.isFinite(Date.parse(s.nextActionEditedAt)) && <Text size="xs" c="dimmed">Action saved {new Date(s.nextActionEditedAt).toLocaleString()}</Text>}
-        </Stack>
+          {s.nextActionEditedAt && Number.isFinite(Date.parse(s.nextActionEditedAt)) && <Text size="xs" c="dimmed" className="property-footnote">Action saved {relative(s.nextActionEditedAt)}</Text>}
+        </div>}
 
         <Group gap="xs" wrap="wrap" hidden={section !== "context"}>
           <Text size="xs" c="dimmed" flex={1}>

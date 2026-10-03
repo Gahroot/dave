@@ -201,4 +201,20 @@ describe("external sources stay unchanged", () => {
     await refresh(paths, repo);
     expect(fingerprint(home)).toEqual(before);
   });
+
+  it("gathers meeting follow-up evidence with one fixed read-only git command", async () => {
+    const { gatherEvidence } = await import("../src/meetings/followup.ts");
+    const { datedCommitSubjects } = await import("../src/adapters/git.ts");
+    const before = fingerprint(home);
+    const db = openDb(appHome);
+    const repo = makeRepo(db);
+    const alpha = [...repo.latest()!.active, ...repo.latest()!.other].find((p) => p.name === "alpha")!;
+    spawns.length = 0;
+    // The spawn spy above loses execFile's promisified output, so this checks the
+    // command and the untouched tree; git.test.ts checks the parsed commits.
+    await gatherEvidence({ db, commits: datedCommitSubjects }, alpha, "2000-01-01T00:00:00.000Z");
+    db.close();
+    expect(spawns).toEqual([["git", "--no-optional-locks", "--no-pager", "log", "-30", "--format=%cI%x00%s"]]);
+    expect(fingerprint(home)).toEqual(before);
+  });
 });

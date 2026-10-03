@@ -12,7 +12,13 @@ import { generateInbox, type InboxInput } from "./inbox.ts";
 import { buildToday } from "../attention/today.ts";
 import type { SourcePaths } from "../shared/paths.ts";
 import type { Repo } from "../db/repo.ts";
-import type { Portfolio } from "../shared/types.ts";
+import type { Portfolio, PortfolioProject } from "../shared/types.ts";
+
+/** Optional steps that run inside refresh's save transaction. */
+export type RefreshHooks = {
+  /** Adds attention from other sources (meetings) right after the portfolio's own. */
+  attention?: (visible: PortfolioProject[], now: Date) => void;
+};
 
 export function withAttention(portfolio: Portfolio, repo: Repo, now: Date): Portfolio {
   const clean = [...portfolio.active, ...portfolio.other, ...portfolio.hidden].map((p) => {
@@ -56,6 +62,7 @@ export async function refresh(
   paths: SourcePaths,
   repo: Repo,
   now = new Date(),
+  hooks: RefreshHooks = {},
 ): Promise<Portfolio> {
   const { data: projects, issues } = await buildPortfolio({
     discovery: [ezbossLinksDiscovery(paths), ezcoderDiscovery(paths), pew2Discovery(paths)],
@@ -83,6 +90,9 @@ export async function refresh(
   }
   return repo.transaction(() => {
   generateInbox(inboxInputs, repo, now, repo.latest() === null);
+  // Same save step: generateInbox switched off every row of the projects it
+  // observed, including meeting rows, so they must be re-added here.
+  hooks.attention?.([...active, ...other], now);
 
   const portfolio: Portfolio = {
     generatedAt: now.toISOString(),

@@ -26,7 +26,7 @@ const contrast = (fg, bg) => {
   return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
 };
 async function openFirstRequest(target) { await target.locator('[data-inbox-key^="request:"]').first().click(); await target.locator('[data-attention-id]').first().waitFor(); }
-async function openProject(target) { await openFirstRequest(target); await target.getByRole('link', { name: 'View project', exact: true }).click(); }
+async function openProject(target) { await openFirstRequest(target); await target.getByRole('link', { name: 'View project', exact: true }).click(); assert.equal(await target.getByRole('tab', { name: 'Work', exact: true }).getAttribute('aria-selected'), 'true'); await target.getByRole('tab', { name: 'Reference', exact: true }).click(); }
 async function navigate(target, label) { if (!await target.getByRole('link', { name: label, exact: true }).isVisible()) await target.getByRole('button', { name: 'Menu', exact: true }).click(); await target.getByRole('link', { name: label, exact: true }).click(); }
 let primaryContrast;
 let secondaryContrast;
@@ -49,7 +49,10 @@ try {
   await page.keyboard.press('Enter');
   await page.getByRole('region', { name: /Project details:/ }).waitFor();
   const detailUrl = page.url();
+  assert.equal(await page.getByLabel('Project directory', { exact: true }).count(), 0);
+  await page.getByRole('tab', { name: 'Reference', exact: true }).click();
   {
+    await page.getByRole('button', { name: 'Choose/update next action', exact: true }).waitFor();
     const missingActionEditor = await page.getByRole('button', { name: 'Choose/update next action', exact: true }).count() === 0;
     const projectId = new URLSearchParams(page.url().split('?')[1]).get('id');
     assert.equal((await fetch(`${base}/api/projects/${projectId}/summary`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ recentFocus: 'Synthetic existing context' }) })).status, 200);
@@ -58,7 +61,7 @@ try {
     await page.getByRole('button', { name: /^Correct Most recently worked on:/ }).click();
     const editor = page.getByRole('textbox', { name: 'Correct Most recently worked on' });
     await editor.fill('Synthetic draft must survive rejection');
-    await page.getByText('Most recently worked on', { exact: true }).click();
+    await page.getByText('Most recently worked on', { exact: true }).filter({visible:true}).click();
     const saveButton = page.getByRole('button', { name: 'Save', exact: true });
     if (await saveButton.count()) {
       await saveButton.click();
@@ -73,23 +76,23 @@ try {
     await saveButton.click();
     await page.getByRole('button', { name: 'Correct Most recently worked on: Synthetic draft must survive rejection', exact: true }).waitFor();
   }
-  await page.getByRole('tab', { name: 'Context', exact: true }).click();
+  await page.locator('summary').filter({ hasText: 'Sources and context' }).click();
   await keyboardTo('Copy handoff');
   await page.keyboard.press('Enter');
   await page.getByLabel('Copy handoff: selectable text').waitFor();
   assert.match(await page.getByLabel('Copy handoff: selectable text').inputValue(), /Directory:/);
   await page.screenshot({ path: `${out}/project-desktop.png`, fullPage: true });
-  await page.goBack(); // Context -> Overview retains the project workspace.
+  await page.goBack(); // Reference -> Work retains the project workspace.
   await page.goBack();
   await page.locator(`[data-attention-id="${itemId}"]`).waitFor();
-  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'View project');
+  await page.waitForFunction(() => document.activeElement?.textContent === 'View project');
   await page.goForward();
   assert.equal(page.url(), detailUrl);
   await page.goBack();
   await keyboardTo('Handled');
   await page.keyboard.press('Enter');
   await page.waitForFunction((id) => !document.querySelector(`[data-attention-id="${id}"]`), itemId);
-  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Inbox');
+  assert.match(await page.evaluate(() => document.activeElement?.textContent), /Saved locally/);
   await keyboardTo('Undo last action');
   await page.keyboard.press('Enter');
   await page.locator(`[data-attention-id="${itemId}"]`).waitFor();
@@ -101,7 +104,8 @@ try {
   await page.getByRole('link', { name: 'Synthetic export portal', exact: true }).click();
   await page.reload();
   await page.getByRole('region', { name: /Project details:/ }).waitFor();
-  assert.equal(await page.getByLabel('Search projects by name or full path').inputValue(), 'export');
+  assert.equal(await page.getByLabel('Search projects by name or full path').count(), 0);
+  assert.equal(new URLSearchParams(page.url().split('?')[1]).get('q'), 'export');
   await page.setViewportSize({ width: 320, height: 900 });
   await page.screenshot({ path: `${out}/project-narrow.png`, fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'project reflow');
@@ -160,6 +164,7 @@ try {
   await returned;
   assert.equal(reads, 3, 'return refreshes once');
   await timed.getByRole('link', { name: 'View project', exact: true }).click();
+  await timed.getByRole('tab', { name: 'Reference', exact: true }).click();
   await timed.getByRole('button', { name: 'Choose/update next action', exact: true }).click();
   const timedDraft = timed.getByRole('textbox', { name: 'Choose/update next action', exact: true });
   await timedDraft.fill('Synthetic background-safe draft');
@@ -222,14 +227,17 @@ try {
   await editingPage.goto(chosenUrl);
   await actionControl.click();
   await actionDraft.fill('Draft must not leak to another project');
-  const otherProjectLink = editingPage.getByRole('link', { name: /^Synthetic project/ }).last();
-  const otherProjectName = await otherProjectLink.getAttribute('aria-label');
+  const otherProjectLink = editingPage.getByRole('link', { name: 'Back to projects', exact: true });
   editingPage.once('dialog', dialog => dialog.dismiss());
   await otherProjectLink.click();
   assert.equal(await actionDraft.inputValue(), 'Draft must not leak to another project', 'Cancel navigation retains draft');
   editingPage.once('dialog', dialog => dialog.accept());
   await otherProjectLink.click();
+  const another = editingPage.getByRole('link', { name: /^Synthetic project/ }).last();
+  const otherProjectName = await another.getAttribute('aria-label');
+  await another.click();
   await editingPage.getByRole('region', { name: `Project details: ${otherProjectName}`, exact: true }).waitFor();
+  await editingPage.getByRole('tab', { name: 'Reference', exact: true }).click();
   assert.equal(await actionDraft.count(), 0, 'navigation discards only the previous project draft');
   await editingPage.close();
   const clipboardPage = await context.newPage();
@@ -238,6 +246,101 @@ try {
   await clipboardPage.getByRole('button', { name: 'Copy project notes (context only)', exact: true }).click();
   await clipboardPage.waitForFunction(() => window.syntheticClipboard?.includes('no execution authorized'));
   await clipboardPage.close();
+  // Replacement navigation, page/filter history, legacy links and representative widths.
+  await page.emulateMedia({forcedColors:'none',reducedMotion:'reduce',colorScheme:'light'});
+  await page.setViewportSize({width:1280,height:800});
+  await page.goto(`${base}/#queue?filter=all&page=2`);
+  await page.getByText(/Page 2 of/).waitFor();
+  const secondPageRow = page.locator('[data-inbox-key]').first();
+  const rowKey = await secondPageRow.getAttribute('data-inbox-key');
+  await secondPageRow.focus(); await page.keyboard.press('Enter');
+  await page.locator('[data-attention-id]').waitFor();
+  assert.equal(await page.locator('[data-inbox-key]').count(), 0);
+  assert.equal(await page.getByLabel('Inbox filters').count(), 0);
+  await page.getByRole('link',{name:'Back to inbox',exact:true}).click();
+  await page.getByText(/Page 2 of/).waitFor();
+  await page.waitForFunction(key => document.activeElement?.getAttribute('data-inbox-key') === key,rowKey);
+  await page.goForward(); await page.locator('[data-attention-id]').waitFor();
+  assert.match(page.url(), /page=2/);
+  await page.goto(`${base}/#queue?item=missing-request`); await page.getByRole('heading',{name:'This request is no longer in the queue'}).waitFor();
+  await page.getByRole('link',{name:'Back to inbox',exact:true}).click();
+  await page.getByRole('link',{name:'Waiting',exact:true}).click();
+  await page.locator('.workspace-filter a[aria-current="true"]').filter({hasText:/^Waiting$/}).waitFor();
+  assert.equal(await page.getByRole('link',{name:'Waiting',exact:true}).getAttribute('aria-current'),'true');
+  await page.getByRole('link',{name:'All',exact:true}).click();
+  const farRow = page.locator('[data-inbox-key]').nth(80);
+  await farRow.scrollIntoViewIfNeeded();
+  const farKey = await farRow.getAttribute('data-inbox-key');
+  const listY = await page.evaluate(()=>scrollY);
+  assert.ok(listY > 1000);
+  await farRow.click(); await page.locator('[data-attention-id]').waitFor();
+  await page.getByRole('link',{name:'Back to inbox',exact:true}).click();
+  await page.waitForFunction(({key,y})=>document.activeElement?.getAttribute('data-inbox-key')===key && Math.abs(scrollY-y)<4,{key:farKey,y:listY});
+  await page.evaluate(()=>scrollTo(0,0));
+  for(const [width,height] of [[1280,800],[1440,900],[768,900],[390,844]]) {
+    await page.setViewportSize({width,height});
+    await page.screenshot({path:`${out}/workspace-list-${width}.png`,fullPage:false});
+    await openFirstRequest(page);
+    assert.equal(await page.locator('.workspace-list').count(),0);
+    await page.screenshot({path:`${out}/workspace-request-${width}.png`,fullPage:true});
+    await page.getByRole('link',{name:'View project',exact:true}).click();
+    await page.getByRole('tab',{name:'Work',exact:true}).waitFor();
+    assert.equal(await page.getByRole('tab',{name:'Work',exact:true}).getAttribute('aria-selected'),'true');
+    assert.equal(await page.locator('.workspace-list').count(),0);
+    await page.getByLabel('What are you trying to build',{exact:true}).waitFor();
+    await page.screenshot({path:`${out}/workspace-work-${width}.png`,fullPage:true});
+    await page.getByRole('link',{name:'Back to inbox item',exact:true}).click();
+    await page.getByRole('link',{name:'Back to inbox',exact:true}).click();
+  }
+  await page.goto(chosenUrl.replace('tab=overview','tab=context'));
+  await page.locator('summary').filter({hasText:'Sources and context'}).waitFor();
+  assert.equal(await page.locator('summary').filter({hasText:'Sources and context'}).evaluate(e=>e.parentElement.open),true);
+  await page.setViewportSize({width:1280,height:800});
+  await page.getByRole('link',{name:'Back to projects',exact:true}).click();
+  await page.getByLabel('Search projects by name or full path').fill('export');
+  await page.getByRole('link',{name:'Synthetic export portal',exact:true}).click();
+  await page.getByRole('tab',{name:'Reference',exact:true}).click();
+  await page.getByRole('button',{name:'Choose/update next action',exact:true}).waitFor();
+  await page.getByRole('link',{name:'Back to projects',exact:true}).click();
+  await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='Synthetic export portal');
+  await page.getByRole('link',{name:'Synthetic export portal',exact:true}).click();
+  await page.getByRole('tab',{name:'Reference',exact:true}).click();
+  await page.getByRole('button',{name:'Options for Synthetic export portal',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Hide',exact:true}).click();
+  await page.getByText('Hidden project: still available through this direct link.').waitFor();
+  await page.getByRole('link',{name:'Back to projects',exact:true}).click();
+  assert.equal(await page.getByLabel('Search projects by name or full path').inputValue(),'export');
+  await page.getByRole('link',{name:'Hidden projects',exact:true}).click();
+  await page.getByRole('link',{name:'Synthetic export portal',exact:true}).click();
+  await page.getByRole('tab',{name:'Reference',exact:true}).click();
+  await page.getByRole('button',{name:'Choose/update next action',exact:true}).waitFor();
+  await page.getByRole('link',{name:'Back to projects',exact:true}).click();
+  await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='Synthetic export portal');
+  await page.getByRole('link',{name:'Synthetic export portal',exact:true}).click();
+  await page.getByRole('tab',{name:'Reference',exact:true}).click();
+  await page.getByRole('button',{name:'Options for Synthetic export portal',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Unhide',exact:true}).click();
+  const lazy = await context.newPage();
+  let deliveryReads = 0;
+  lazy.on('request',request=>{if(request.method()==='GET' && /\/api\/projects\/[^/]+\/delivery$/.test(new URL(request.url()).pathname)) deliveryReads++;});
+  const chosenId = new URLSearchParams(new URL(chosenUrl).hash.split('?')[1]).get('id');
+  await lazy.goto(`${base}/#projects?id=${chosenId}&tab=overview`);
+  await lazy.getByRole('button',{name:'Choose/update next action',exact:true}).waitFor();
+  assert.equal(deliveryReads,0,'Reference alone does not load delivery');
+  await lazy.getByRole('tab',{name:'Work',exact:true}).click();
+  await lazy.getByLabel('What are you trying to build',{exact:true}).waitFor();
+  assert.equal(deliveryReads,1,'one delivery fetch owner');
+  await lazy.getByRole('tab',{name:'Reference',exact:true}).click();
+  await lazy.getByRole('tab',{name:'Work',exact:true}).click();
+  await lazy.getByLabel('What are you trying to build',{exact:true}).waitFor();
+  assert.equal(deliveryReads,1,'visited Work stays mounted');
+  await lazy.close();
+  const direct = await context.newPage();
+  const directId = rowKey.slice('request:'.length);
+  const seenRequest = direct.waitForRequest(request=>request.url().endsWith('/api/attention/seen'));
+  await direct.goto(`${base}/#queue?item=${directId}&page=2`);
+  assert.deepEqual((await seenRequest).postDataJSON().ids,[directId],'opening one request never marks the invisible list seen');
+  await direct.close();
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ status: 'pass', syntheticFirstDecisionRenderedMs: identifyMs, contrast: { primaryText: primaryContrast.toFixed(2), secondaryText: secondaryContrast.toFixed(2) }, keyboardFlow: 'project, copy fallback, Back/Forward, handled, undo', reflow: '320px and 200% text', states: 'search empty, clipboard denied, read failure/retry, reduced motion, forced colors', updates: 'minute TTL, pause, hidden-tab silence, return refresh, focus preserved', screenReader: 'unverified' }, null, 2));
 } finally { await browser.close(); }

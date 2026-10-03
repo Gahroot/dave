@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Group, Stack, Text } from "@mantine/core";
 import { WorkspaceShell } from "./components/WorkspaceShell.tsx";
-import { RefreshCw as IconRefresh } from "lucide-react";
+import { ArrowRight as IconOpen, CircleAlert as IconInvalid, CloudOff as IconStale, Pause as IconPause, Play as IconPlay, RefreshCw as IconRefresh, Sparkles as IconUpdate } from "lucide-react";
 import type { AttentionAction, Portfolio, ProjectSummary } from "../shared/types.ts";
 import { TodayView } from "./sections/TodayView.tsx";
 import { ProjectsView } from "./sections/ProjectsView.tsx";
@@ -11,9 +11,11 @@ import { ConnectionsView } from "./sections/ConnectionsView.tsx";
 import { Issues } from "./sections/Issues.tsx";
 
 import { handoff, relative } from "./format.ts";
-import { parseRoute } from "./navigation.ts";
+import { parseRoute, routeLink, safeReturn } from "./navigation.ts";
+import { useWorkspaceReturn } from "./hooks/useWorkspaceReturn.ts";
 
 const AgentPlatform = lazy(() => import("./sections/AgentPlatform.tsx").then(m => ({ default: m.AgentPlatform })));
+const MeetingsView = lazy(() => import("./sections/MeetingsView.tsx").then(m => ({ default: m.MeetingsView })));
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000), headers: init?.body ? { "content-type": "application/json" } : undefined });
@@ -33,6 +35,7 @@ export function App() {
   const saving = useRef(false);
   const lastLoad = useRef(0);
   const [route, setRoute] = useState(() => window.location.hash);
+  useWorkspaceReturn(route);
   const [, params = ""] = route.slice(1).split("?");
   const navigation = parseRoute(route);
   const tab = navigation.destination;
@@ -44,10 +47,7 @@ export function App() {
     window.addEventListener("hashchange", navigate);
     return () => window.removeEventListener("hashchange", navigate);
   }, []);
-  useEffect(() => {
-    const id = new URLSearchParams(params).get("item");
-    if (tab === "queue" && id) document.getElementById(`destination-${id}`)?.focus();
-  }, [route, tab, params]);
+
   const load = useCallback((fresh: boolean, background = false): Promise<void> => {
     if (loading.current) return loading.current;
     if (background && (saving.current || Date.now() - lastLoad.current < 60_000)) return Promise.resolve();
@@ -142,28 +142,29 @@ export function App() {
 
   return <WorkspaceShell destination={tab} actions={<Group gap="md" justify="flex-end" className="workspace-toolbar">
     <Text size="sm" c="dimmed">Updated {relative(portfolio?.generatedAt ?? null)}</Text>
-    <Group gap="xs"><Button variant="subtle" color="dark" disabled={!!busyId} leftSection={<IconRefresh size={14} aria-hidden="true" />} loading={busy} onClick={() => void load(true)}>Refresh</Button><Button variant="subtle" color="dark" aria-pressed={paused} onClick={() => setPaused(v => !v)}>{paused ? "Resume auto-updates" : "Pause auto-updates"}</Button></Group>
+    <Group gap="xs"><Button variant="subtle" color="dark" disabled={!!busyId} leftSection={<IconRefresh size={14} aria-hidden="true" />} loading={busy} onClick={() => void load(true)}>Refresh</Button><Button variant="subtle" color="dark" leftSection={paused ? <IconPlay size={14} aria-hidden="true" /> : <IconPause size={14} aria-hidden="true" />} aria-pressed={paused} onClick={() => setPaused(v => !v)}>{paused ? "Resume auto-updates" : "Pause auto-updates"}</Button></Group>
   </Group>}>
         <Stack gap="md">
-          {(error || portfolio?.stale) && <Alert color="red" title="Showing saved information" role="alert">{error ?? portfolio?.refreshError}<Button variant="default" ml="xs" onClick={() => void load(true)}>Retry</Button></Alert>}
-          {pending && <Alert color="gray" title="Updated information is ready" role="status">Your focused item has stayed in place.<Button variant="default" onClick={() => { if (!document.querySelector("[data-summary-editing]")) { setPortfolio(pending); setPending(null); } }}>Apply update</Button></Alert>}
-          {(navigation.invalidSelection || navigation.invalidRun) && <Alert title="Invalid destination" role="alert">This link does not identify available work. Choose an item from the directory.</Alert>}
+          {(error || portfolio?.stale) && <Alert color="red" icon={<IconStale size={18} aria-hidden="true" />} title="Showing saved information" role="alert"><Group gap="xs" align="center">{error ?? portfolio?.refreshError}<Button variant="default" size="xs" leftSection={<IconRefresh size={14} aria-hidden="true" />} onClick={() => void load(true)}>Retry</Button></Group></Alert>}
+          {pending && <Alert color="blue" icon={<IconUpdate size={18} aria-hidden="true" />} title="Updated information is ready" role="status"><Group gap="xs" align="center">Your focused item has stayed in place.<Button size="xs" onClick={() => { if (!document.querySelector("[data-summary-editing]")) { setPortfolio(pending); setPending(null); } }}>Apply update</Button></Group></Alert>}
+          {(navigation.invalidSelection || navigation.invalidRun) && <Alert color="orange" icon={<IconInvalid size={18} aria-hidden="true" />} title="Invalid destination" role="alert">This link does not identify available work. Choose an item from the directory.</Alert>}
           {!portfolio && <Text role="status">{busy ? "Loading your portfolio…" : "No snapshot loaded."}</Text>}
           {tab === "connections" && <ConnectionsView />}
           {tab === "agents" && <Suspense fallback={<Text role="status">Loading agent desk…</Text>}><AgentPlatform paused={paused} /></Suspense>}
+          {tab === "meetings" && <Suspense fallback={<Text role="status">Loading meetings…</Text>}><MeetingsView route={route} paused={paused} refreshedAt={portfolio?.generatedAt ?? null} /></Suspense>}
           {portfolio && <>
             {tab === "queue" && <>
               <TodayView route={route} paused={paused} portfolio={portfolio} busyId={busyId} onResolve={resolve} onSeen={seen} actions={(item) => {
                 const p = [...portfolio.active, ...portfolio.other, ...portfolio.hidden].find((p) => p.id === item.projectId);
                 return p ? <Group align="flex-start" gap="xs">
-                  <Button component="a" href={`#projects?id=${encodeURIComponent(p.id)}`} variant="default" id={`destination-${item.id}`}
-                    onClick={() => window.history.replaceState(null, "", `#queue?item=${encodeURIComponent(item.id)}`)}>View project</Button>
+                  <Button component="a" href={routeLink("projects", { id: p.id, return: safeReturn(route) })} variant="default" rightSection={<IconOpen size={14} aria-hidden="true" />} id={`destination-${item.id}`} data-workspace-focus={`request-project:${item.id}`}>View project</Button>
+                  {(item.kind === "meeting-promise" || item.kind === "client-idea") && <Button component="a" href={routeLink("meetings", { section: item.kind === "client-idea" ? "asks" : null })} variant="default" rightSection={<IconOpen size={14} aria-hidden="true" />}>Open in Meetings</Button>}
                   <CopyText text={p.canonicalPath} label="Copy path" /><CopyText text={handoff(p, item)} label="Copy handoff" />
                 </Group> : <Text size="sm">Project context unavailable; retained evidence may be stale.</Text>;
               }} />
             </>}
             {projectNavigation.destination === "projects" && <div hidden={tab !== "projects"}><ProjectsView items={portfolio.inbox} projects={[...portfolio.active, ...portfolio.other, ...portfolio.hidden]} query={projectNavigation.q} selectedId={projectNavigation.id} waiting={projectNavigation.waiting} route={projectRoute}
-              onSearch={(value) => { const next = new URLSearchParams(params); next.set("q", value); const hash = `#projects?${next}`; window.history.replaceState(null, "", hash); setRoute(hash); }}
+              onSearch={(value) => { const next = new URLSearchParams(params); next.set("q", value); const hash = `#projects?${next}`; window.history.replaceState(window.history.state, "", hash); setRoute(hash); }}
               busyId={busyId} onOverride={overrideProject} onCorrect={correctSummary} /></div>}
             {tab === "issues" && <Issues issues={portfolio.issues} coverage={portfolio.coverage} />}
           </>}

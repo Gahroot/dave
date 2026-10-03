@@ -18,7 +18,7 @@ function validOrigin(value: string): boolean {
 }
 function guardedRoute(url: string): boolean {
   return url === CSRF_PATH || /^\/api\/agents(?:\/|$)/.test(url) || /^\/api\/delivery(?:\/|$)/.test(url) || /^\/api\/providers(?:\/|$)/.test(url) ||
-    /^\/api\/projects\/[^/]+\/delivery(?:\/|$)/.test(url);
+    /^\/api\/meetings(?:\/|$)/.test(url) || /^\/api\/projects\/[^/]+\/delivery(?:\/|$)/.test(url);
 }
 function fail(reply: FastifyReply, status: number, error: string) {
   return reply.code(status).send({ error });

@@ -20,7 +20,34 @@ export function planningProjectFacts(project: PortfolioProject) {
   };
 }
 
-export const CONTEXT_CATEGORIES = ["goal", "documents", "manifest", "entrypoints", "coverage", "history"] as const;
+export const CONTEXT_CATEGORIES = ["goal", "documents", "manifest", "entrypoints", "coverage", "history", "meetings"] as const;
+/** The meetings digest stays small inside the reviewed 64 KB packet. */
+export const MAX_MEETINGS_DIGEST_BYTES = 8000;
+/** What meetings contribute: DAVE's own analysis, never transcripts. */
+export type MeetingsDigest = {
+  promises: { text: string; due: string | null; promisedOn: string }[];
+  painPoints: { text: string; idea: string | null }[];
+  decisions: { text: string; decidedOn: string }[];
+};
+
+/** Fits a digest under the byte budget by dropping the oldest entries of the longest list first. */
+export function boundedMeetingsDigest(digest: MeetingsDigest, maxBytes = MAX_MEETINGS_DIGEST_BYTES): { text: string; truncated: boolean } {
+  const lists = { promises: [...digest.promises], painPoints: [...digest.painPoints], decisions: [...digest.decisions] };
+  const clip = (s: string, n: number) => s.length <= n ? s : `${s.slice(0, n - 1)}…`;
+  lists.promises = lists.promises.map(p => ({ ...p, text: clip(p.text, 300) }));
+  lists.painPoints = lists.painPoints.map(p => ({ text: clip(p.text, 300), idea: p.idea === null ? null : clip(p.idea, 200) }));
+  lists.decisions = lists.decisions.map(d => ({ ...d, text: clip(d.text, 300) }));
+  let truncated = false;
+  let text = JSON.stringify(lists);
+  while (Buffer.byteLength(text) > maxBytes) {
+    const longest = (["promises", "painPoints", "decisions"] as const).reduce((a, b) => lists[a].length >= lists[b].length ? a : b);
+    if (lists[longest].length === 0) break;
+    lists[longest].pop();
+    truncated = true;
+    text = JSON.stringify(lists);
+  }
+  return { text, truncated };
+}
 export type ContextCategory = typeof CONTEXT_CATEGORIES[number];
 export type ContextPermissions = {
   collect: true;
@@ -67,9 +94,11 @@ const entrypoints = ["src/index.ts", "src/main.ts", "src/main.tsx", "src/App.tsx
 export async function collectDeliveryContext(input: {
   project: Pick<PortfolioProject, "id" | "canonicalPath">; goal: DeliveryGoal; provider: "openai" | "claude"; model: string;
   permissions: ContextPermissions; history?: DeliveryEvent[]; plans?: DeliveryPlan[]; coordination?: CoordinationState;
+  /** Read only when the owner selects the meetings category. */
+  meetings?: () => MeetingsDigest;
 }): Promise<DeliveryContextPacket> {
   const { project, goal, permissions } = input;
-  if (permissions?.collect !== true || !Array.isArray(permissions.categories) || permissions.categories.length > 6 ||
+  if (permissions?.collect !== true || !Array.isArray(permissions.categories) || permissions.categories.length > CONTEXT_CATEGORIES.length ||
       permissions.categories.some((c) => !CONTEXT_CATEGORIES.includes(c)) ||
       !Array.isArray(permissions.documents) || permissions.documents.length > 8 ||
       (permissions.additionalFiles?.length ?? 0) > 4 || !["openai", "claude"].includes(input.provider)) throw new Error("Context permission rejected");
@@ -139,6 +168,14 @@ export async function collectDeliveryContext(input: {
       if (event.kind !== "complete" || event.source !== "user-reported" || !("outcome" in event.detail) || !("evidence" in event.detail)) continue;
       add("history", `Reported completion ${bounded(event.id, 100)}`, JSON.stringify({ milestoneId: event.milestoneId === null ? null : bounded(event.milestoneId, 100), outcome: bounded(event.detail.outcome, 2000), evidence: bounded(event.detail.evidence, 2000) }), "user-reported");
     }
+  }
+  if (categories.includes("meetings")) {
+    const digest = input.meetings?.() ?? { promises: [], painPoints: [], decisions: [] };
+    const { text, truncated } = boundedMeetingsDigest(digest);
+    // Contains client words: quoted evidence of what was said, not instructions or proof.
+    add("meetings", "Meeting digest: open promises, client pain points, decisions", text, "user-reported");
+    limitations.push("Meeting items are DAVE's analysis of recorded calls, not verification of the work.");
+    if (truncated) limitations.push(`Meeting digest shortened to ${MAX_MEETINGS_DIGEST_BYTES} bytes; older items were left out.`);
   }
   if (new Set(sources.map((s) => s.id)).size !== sources.length) throw new Error("Duplicate context source");
   const body = { version: 1 as const, projectId: bounded(project.id, 200), provider: input.provider, model: bounded(input.model, 100), categories, sources, assumptions: [] as string[], limitations };

@@ -24,7 +24,7 @@ const starts = () => mutations.filter(url => new URL(url).pathname === '/api/age
 try {
  await page.goto('http://127.0.0.1:4320/#projects');
  await activate(page.getByRole('link', { name: 'Synthetic onboarding', exact: true }));
- await page.getByRole('tab', { name: 'Delivery', exact: true }).click();
+ await page.getByRole('tab', { name: 'Work', exact: true }).click();
  for (const [label,text] of [['What are you trying to build','Bounded synthetic member pilot'],['Who uses it','Synthetic members'],['What they do with it day to day','Enroll and recover without staff intervention'],['Where it is now, and what you are unsure about','Fixture prototype; live acceptance not claimed']]) await page.getByLabel(label, { exact:true }).fill(text);
  await page.getByLabel('Who breaks the work into pieces', { exact:true }).selectOption('');
  const savedGoal = await save('Save delivery settings','/delivery/goal');
@@ -118,7 +118,17 @@ try {
    assert.equal(await button('Looks good, move on').isDisabled(),true);
    await page.getByLabel('Acceptance evidence or reason').fill('Reviewed the synthetic evidence and remaining risks; acceptance is mine');
    await page.getByLabel("I read this and I'm happy with it").check();
-   if(i===0) await screenshot('evidence-review');
+   if(i===0) {
+     assert.equal(await page.getByRole('button', { name: 'Send back for more work', exact: true }).isVisible(), true);
+     assert.equal(await page.getByRole('button', { name: "Park it, I'm blocked", exact: true }).isVisible(), true);
+     for (const [width,height] of [[1280,800],[1440,900],[768,900],[390,844]]) {
+       await page.setViewportSize({width,height}); await page.evaluate(() => scrollTo(0,0));
+       assert.equal(await page.locator('.workspace-list').count(), 0);
+       await screenshot(`eligible-review-${width}`);
+     }
+     await page.setViewportSize({width:1280,height:900});
+     await screenshot('evidence-review');
+   }
    await save('Looks good, move on','/coordination/review');
  }
  let state=await read(); assert.equal(state.coordination.reports.length,3); assert.equal(state.coordination.decisions.filter(d=>d.action==='accept').length,3);
@@ -198,6 +208,57 @@ try {
  assert.equal(done.state.plans.at(-1).milestones[2].status, 'reported-complete');
  assert.equal(starts(), 1); assert.deepEqual(errors, []);
  assert.ok(mutations.every(u => !/(generate|replan|context\/approve|providers)/.test(u)));
+ // A long failed report exercises real return/park decisions after the original completion assertions.
+ await disclosure('The whole picture:');
+ await page.getByLabel('Reason to reopen completed work').fill('Exercise long failed evidence without accepting it.');
+ await save('Redo Operational recovery', '/coordination/review');
+ await save('Get the prompt', '/coordination/handoff');
+ await activate(button('Use another tool')); await disclosure('Exact format your coding tool must reply in');
+ const failed = JSON.parse(await page.getByLabel('Required reply').inputValue());
+ failed.outcome = 'Synthetic long reported outcome. '.repeat(35);
+ failed.criteria.forEach((c,index) => { c.status = index ? 'unknown' : 'unmet'; c.evidence = 'Critical synthetic finding remains unresolved.'; });
+ failed.commands = [{command:'npm test',exitCode:1,evidence:'Synthetic command failed.'},{command:'npm run build',exitCode:null,evidence:'Build was not run.'},{command:'successful-check',exitCode:0,evidence:'Successful optional transcript. '.repeat(90)}];
+ failed.blockers = ['Synthetic access is still missing.']; failed.risks = ['Synthetic risk requires human assessment.'];
+ await page.getByLabel('Paste result JSON').fill(JSON.stringify(failed));
+ await page.getByLabel('I read this before saving it').check(); await save('Save it','/coordination/report');
+ await page.getByLabel('Acceptance evidence or reason').fill('Return the unresolved synthetic findings.');
+ await page.getByLabel("I read this and I'm happy with it").check();
+ assert.equal(await button('Looks good, move on').isDisabled(), true);
+ assert.equal(await page.locator('.review-evidence').getByText(failed.blockers[0], {exact:false}).isVisible(), true);
+ assert.equal(await page.locator('.review-evidence').getByText(failed.risks[0], {exact:false}).isVisible(), true);
+ assert.equal(await page.getByText(failed.commands[2].evidence, {exact:true}).isVisible(), false);
+ for (const [width,height] of [[1280,800],[1440,900],[768,900],[390,844],[320,900]]) {
+   await page.setViewportSize({width,height}); await page.evaluate(() => scrollTo(0,0));
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+   // The previous iteration's full-page screenshot briefly resizes the page and the autosize textarea re-measures
+   // during it (observed 216px settling to 42px within 50ms). Wait for layout to settle; the size limit is unchanged.
+   const compact = await page.getByLabel('Acceptance evidence or reason').evaluate(e => new Promise(resolve => {
+     const deadline = performance.now() + 2000;
+     const check = () => e.getBoundingClientRect().height < 200 ? resolve(true) : performance.now() > deadline ? resolve(false) : requestAnimationFrame(check);
+     check();
+   }));
+   assert.ok(compact, `short review reason remains compact at ${width}px`);
+   await screenshot(`failed-review-${width}`);
+ }
+ await page.setViewportSize({width:1280,height:800});
+ await disclosure('Commands and evidence');
+ assert.equal(await page.getByText(failed.commands[2].evidence, {exact:true}).isVisible(), true);
+ await save('Send back for more work', '/coordination/review');
+ assert.equal((await read()).coordination.decisions.at(-1).action, 'return');
+ await page.getByRole('heading', {name:/3 tries on Operational recovery/}).waitFor();
+ await disclosure('The whole picture:');
+ await page.getByLabel('Reason to reopen completed work').fill('Exercise parking another reviewed milestone.');
+ await save('Redo Staff correction', '/coordination/review');
+ await save('Get the prompt', '/coordination/handoff');
+ await activate(button('Use another tool')); await disclosure('Exact format your coding tool must reply in');
+ const parkReport = JSON.parse(await page.getByLabel('Required reply').inputValue());
+ parkReport.criteria.forEach(c => { c.status='met'; c.evidence='Synthetic reported success'; });
+ await page.getByLabel('Paste result JSON').fill(JSON.stringify(parkReport)); await page.getByLabel('I read this before saving it').check(); await save('Save it','/coordination/report');
+ assert.equal(await page.getByLabel("I read this and I'm happy with it").isChecked(), false);
+ await page.getByLabel('Acceptance evidence or reason').fill('Park pending a separate human decision.');
+ await save("Park it, I'm blocked", '/coordination/block');
+ assert.equal((await read()).state.plans.at(-1).milestones[1].status, 'blocked');
+ assert.deepEqual(errors, []);
  console.log(JSON.stringify({status:'pass',browser:await browser.version(),manualReports:3,reports:4,accepted:4,assignmentStarts:starts(),providerRequests:0,stalledRecovery:['resend','take back/reopen'],pauseResume:true,screenshots:out,unverified:['screen reader','live pilot','field performance','real elapsed stale time (browser clock emulated)']},null,2));
 } catch(error) { await screenshot('failure'); throw error; }
 finally { await browser.close(); }

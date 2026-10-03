@@ -21,9 +21,12 @@ const ALLOWED_ARGV: readonly (readonly string[])[] = [
   ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
   // Recent subjects only: evidence for extraction, never file contents.
   ["log", "-10", "--format=%s"],
+  // Dated subjects: meeting follow-up evidence ("was this promise worked on since the call?").
+  ["log", "-30", "--format=%cI%x00%s"],
 ];
 
 export const RECENT_SUBJECTS_ARGV = ALLOWED_ARGV[4]!;
+export const DATED_SUBJECTS_ARGV = ALLOWED_ARGV[5]!;
 
 /** Flags prepended to every invocation: never take a lock, never read a pager. */
 const SAFE_PREFIX = ["--no-optional-locks", "--no-pager"];
@@ -72,6 +75,24 @@ export async function recentCommitSubjects(projectPath: string): Promise<string[
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export type DatedCommit = { at: string; subject: string };
+
+/** The last 30 commits with dates and subjects, newest first. Failures yield no evidence. */
+export async function datedCommitSubjects(projectPath: string): Promise<DatedCommit[]> {
+  try {
+    return (await runGit(projectPath, DATED_SUBJECTS_ARGV))
+      .split("\n")
+      .flatMap((line) => {
+        const [when, subject] = line.split("\0");
+        const at = when ? Date.parse(when.trim()) : Number.NaN;
+        const text = subject?.trim();
+        return Number.isFinite(at) && text ? [{ at: new Date(at).toISOString(), subject: text }] : [];
+      });
   } catch {
     return [];
   }

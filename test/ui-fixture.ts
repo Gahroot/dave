@@ -32,6 +32,10 @@ for (const [index, p] of portfolio.active.slice(0, 3).entries()) {
   await app.inject({ method: 'POST', url: `/api/projects/${p.id}/override`, payload: { pinned: true } });
   if (index === 0) await app.inject({ method: 'POST', url: `/api/projects/${p.id}/summary`, payload: { suggestedNextAction: 'Prepare one synthetic acceptance case' } });
 }
+// Extra saved synthetic requests exercise page-two deep links independently of scan coverage.
+const requestProject = portfolio.active.find(p => p.name === "Synthetic export portal");
+if (!requestProject) throw new Error("Synthetic request project missing");
+for (let n = 0; n < 92; n++) seedRepo.proposeInbox({ projectId: requestProject.id, kind: "approval-request", title: `Synthetic saved decision ${n + 1}`, detail: "Synthetic paging fixture: review the saved decision.", dedupeKey: `synthetic-paging-${n}` }, new Date().toISOString());
 seedDb.close();
 await app.listen({ host: "127.0.0.1", port: 4318 });
 console.log("Synthetic fixture ready at http://127.0.0.1:4318");

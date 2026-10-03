@@ -2,6 +2,8 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Db } from "../db/index.ts";
 import { deliveryRepo, DeliveryError } from "../db/delivery-repo.ts";
 import { collectDeliveryContext, CONTEXT_CATEGORIES, reviewableDocument, reviewDeliveryDocument, type ContextPermissions } from "../model/delivery-context.ts";
+import { meetingDigest } from "../meetings/digest.ts";
+import { meetingStore } from "../meetings/store.ts";
 import { deliveryPlanner, type GenerationPurpose } from "../model/delivery-planner.ts";
 import { PlanOutputError, type DeliveryGoal } from "../model/delivery-schema.ts";
 import { deliveryCoordinationRepo } from "../db/delivery-coordination-repo.ts";
@@ -25,7 +27,7 @@ export function registerDeliveryRoutes(app: FastifyInstance, db: Db, inference: 
   }
   function permissions(value: unknown): ContextPermissions {
     strictObject(value, ["collect", "categories", "documents"], ["additionalFiles"]);
-    if (value.collect !== true || !Array.isArray(value.categories) || value.categories.length > 6 || !value.categories.includes("goal") || new Set(value.categories).size !== value.categories.length || value.categories.some(c => !CONTEXT_CATEGORIES.includes(c)) || !Array.isArray(value.documents) || value.documents.length > 8 || value.documents.some(d => typeof d !== "string" || !/^(?:(?:docs|doc)\/)?(?:README|PRODUCT|SCOPE|BRIEF|SPEC|ARCHITECTURE)\.md$/i.test(d))) throw new DeliveryError("invalid", "Invalid context selection");
+    if (value.collect !== true || !Array.isArray(value.categories) || value.categories.length > CONTEXT_CATEGORIES.length || !value.categories.includes("goal") || new Set(value.categories).size !== value.categories.length || value.categories.some(c => !CONTEXT_CATEGORIES.includes(c)) || !Array.isArray(value.documents) || value.documents.length > 8 || value.documents.some(d => typeof d !== "string" || !/^(?:(?:docs|doc)\/)?(?:README|PRODUCT|SCOPE|BRIEF|SPEC|ARCHITECTURE)\.md$/i.test(d))) throw new DeliveryError("invalid", "Invalid context selection");
     if (value.additionalFiles !== undefined) {
       if (!Array.isArray(value.additionalFiles) || value.additionalFiles.length > 4) throw new DeliveryError("invalid", "Invalid file selection");
       for (const file of value.additionalFiles) {
@@ -40,7 +42,7 @@ export function registerDeliveryRoutes(app: FastifyInstance, db: Db, inference: 
     const project = db.prepare("SELECT p.id,p.canonical_path AS canonicalPath,COALESCE(o.hidden,0) AS hidden FROM projects p LEFT JOIN project_overrides o ON o.project_id=p.id WHERE p.id=?").get(id) as { id: string; canonicalPath: string; hidden: number };
     if (project.hidden || !state.goal?.provider || !state.goal.model) throw new DeliveryError("invalid", "Select an available project and planning model first");
     try {
-      const packet = await collectDeliveryContext({ project, goal: state.goal, provider: state.goal.provider, model: state.goal.model, permissions: selection, history: state.history, plans: state.plans, coordination: coordination.read(id).coordination });
+      const packet = await collectDeliveryContext({ project, goal: state.goal, provider: state.goal.provider, model: state.goal.model, permissions: selection, history: state.history, plans: state.plans, coordination: coordination.read(id).coordination, meetings: () => meetingDigest(meetingStore(db), id) });
       expected(id, revision);
       return packet;
     } catch (error) { if (error instanceof DeliveryError) throw error; throw new DeliveryError("invalid", "Context unavailable or changed; review a fresh preview"); }

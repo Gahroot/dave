@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { retainedIssue } from "../model/task-policy.ts";
-import { refresh, withAttention } from "../model/refresh.ts";
+import { refresh, withAttention, type RefreshHooks } from "../model/refresh.ts";
 import { emptySummary } from "../shared/types.ts";
 import type { AttentionAction, ProjectSummary } from "../shared/types.ts";
 import type { SourcePaths } from "../shared/paths.ts";
@@ -16,7 +16,14 @@ const MAX_LEN = 400;
  * routes are optional conveniences.
  */
 export function registerRoutes(app: FastifyInstance, paths: SourcePaths, repo: Repo,
-  options: { clock?: () => Date; refresh?: typeof refresh } = {}): void {
+  options: { clock?: () => Date; refresh?: typeof refresh; hooks?: RefreshHooks;
+    /** Runs in the same transaction as an Inbox action, so meeting items follow it. */
+    onAttentionAction?: (id: string, action: AttentionAction, now: Date) => void } = {}): void {
+  const act = (id: string, action: AttentionAction) => repo.transaction(() => {
+    const now = clock();
+    repo.attentionAction(id, action, now);
+    options.onAttentionAction?.(id, action, now);
+  });
   const clock = options.clock ?? (() => new Date());
   const scan = options.refresh ?? refresh;
   let refreshError: string | undefined;
@@ -29,7 +36,7 @@ export function registerRoutes(app: FastifyInstance, paths: SourcePaths, repo: R
   // simplification: single in-process refresh lock; one user, one process.
   const refreshOnce = () => {
     const revision = localRevision;
-    inFlight ??= scan(paths, repo, clock()).then((portfolio) => {
+    inFlight ??= scan(paths, repo, clock(), options.hooks).then((portfolio) => {
       dirty = revision !== localRevision;
       refreshError = undefined;
       return withAttention(portfolio, repo, clock());
@@ -128,7 +135,7 @@ export function registerRoutes(app: FastifyInstance, paths: SourcePaths, repo: R
       return reply.code(400).send({ error: "invalid attention action or ID" });
     }
     if (!repo.hasInboxItem(id)) return reply.code(404).send({ error: "unknown attention item" });
-    repo.attentionAction(id, action as AttentionAction, clock());
+    act(id, action as AttentionAction);
     return { ok: true, portfolio: stored() };
   });
 
@@ -139,7 +146,7 @@ export function registerRoutes(app: FastifyInstance, paths: SourcePaths, repo: R
       return reply.code(400).send({ error: "unknown action" });
     }
     if (!repo.hasInboxItem(id)) return reply.code(404).send({ error: "unknown inbox item" });
-    repo.attentionAction(id, action === "acknowledge" ? "handled" : "dismiss", clock());
+    act(id, action === "acknowledge" ? "handled" : "dismiss");
     return { ok: true, inbox: repo.inbox(clock()), portfolio: stored() };
   });
 }

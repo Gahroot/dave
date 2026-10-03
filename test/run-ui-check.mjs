@@ -4,12 +4,13 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 
 const targets = {
+  workspace: ['test/ui-fixture.ts', 'test/ui-walkthrough.mjs', 4318],
   delivery: ['test/delivery-ui-fixture.ts', 'test/delivery-ui-walkthrough.mjs', 4320],
   coordination: ['test/delivery-ui-fixture.ts', 'test/coordination-ui-walkthrough.mjs', 4320],
   agent: ['test/agent-ui-fixture.ts', 'test/agent-ui-walkthrough.mjs', 4323],
 };
 const target = Object.hasOwn(targets, process.argv[2]) && targets[process.argv[2]];
-if (!target) throw Error('Choose delivery, coordination or agent');
+if (!target) throw Error('Choose workspace, delivery, coordination or agent');
 const [fixture, walkthrough, port] = target;
 const server = spawn(process.execPath, ['--experimental-strip-types', fixture], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'] });
 let check;

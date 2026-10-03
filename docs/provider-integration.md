@@ -101,3 +101,32 @@ synthetic denied-file sentinels. They cover cold discovery, fresh/cached refresh
 HTTP failed-refresh fallback, missing-source snapshots and the local planning
 seed. Symlinked denied files are rejected before a file handle is opened.
 Existing summary/editor work and live storage remain untouched by this rollout.
+
+## Meeting analysis path (Fathom)
+
+Meeting analysis reuses the OpenAI transport above; Claude stays unavailable.
+
+- **Transport options.** `InferenceRequest` gained an optional `timeoutMs`
+  (clamped to 1 s to 300 s, default 120 s) and `cacheKey` (lower-case slug, default
+  `dave-delivery-v1`). Meetings use `dave-meetings-v1` with a 5-minute timeout; the
+  follow-up check uses `dave-meetings-followup-v1`. Existing delivery callers pass
+  neither, so their behavior is unchanged.
+- **Input ceiling.** Every request is refused before credentials or network when
+  `system + user` exceeds 400 KB (`input_limit`). Delivery planning keeps its own
+  stricter 64 KB checks, unchanged. Output stays capped at 64 KB.
+- **Meeting budget.** One call per meeting up to about 240 KB of request. Longer
+  transcripts are split by turns into pieces of at most 200 KB with a 3-turn
+  overlap, and the summaries are merged. On `provider_restricted` DAVE retries
+  once with half-size pieces; an unreadable answer gets one repair retry.
+- **Consent.** Automatic analysis and the 6-hourly follow-up check run only while
+  the switch is on at the current disclosure version (a hash of the exact text the
+  UI shows) and the OpenAI connection reports `connected` in this session. The
+  background path never reads the Keychain on its own. A one-off Analyze passes the
+  disclosure version with the request and is never stored.
+- **Untrusted output.** The transcript is sent as quoted JSON data; the model has
+  no tools. Projects and promises are `P#` and `C#` handles mapped back locally.
+  Each item is checked against the stored transcript (verbatim quote within two
+  turns, right speaker role) before it is saved.
+- **Not verified yet.** The provider's real input limit for this model was not
+  measured locally. The first live analysis confirms it; a rejected large request
+  falls back to smaller pieces once.

@@ -6,7 +6,7 @@ import { deliveryRepo } from "../src/db/delivery-repo.ts";
 import { deliveryPlanner, DELIVERY_SYSTEM_PROMPT, type GenerationInput } from "../src/model/delivery-planner.ts";
 import { contextDigest, type DeliveryContextPacket } from "../src/model/delivery-context.ts";
 import { parseDeliveryPlan, type DeliveryGoal, type DeliveryPlanDraft } from "../src/model/delivery-schema.ts";
-import { openAIInference, PlanningFailure, type PlanningInference, type InferenceRequest } from "../src/providers/openai.ts";
+import { MAX_INPUT_BYTES, openAIInference, PlanningFailure, type PlanningInference, type InferenceRequest } from "../src/providers/openai.ts";
 import type { StreamOptions } from "@prestyj/ai";
 import { tempDir, AT } from "./helpers.ts";
 
@@ -227,6 +227,38 @@ it("OpenAI timeout/cancel bound credential waits, without starting transport aft
   expect(transport).not.toHaveBeenCalled();
   const controller = new AbortController(); controller.abort();
   await expect(infer({ ...request(), signal: controller.signal })).rejects.toMatchObject({ code: "cancelled" });
+});
+
+it("OpenAI caps input for every caller and accepts a meeting-sized request with its own cache key", async () => {
+  const auth = { getCredentials: vi.fn(async () => ({ accessToken: "synthetic", accountId: "account", expiresAt: Date.now() + 100000 })) };
+  let captured: StreamOptions | undefined;
+  const infer = openAIInference(auth, async function* (options) { captured = options; yield { type: "text_delta", text: "ok" }; yield { type: "done", stopReason: "end_turn" }; });
+  expect(await infer(request())).toBe("ok");
+  expect(captured?.promptCacheKey).toBe("dave-delivery-v1");
+  expect(await infer({ ...request(), cacheKey: "dave-meetings-v1", user: "x".repeat(240_000) })).toBe("ok");
+  expect(captured?.promptCacheKey).toBe("dave-meetings-v1");
+  await infer({ ...request(), cacheKey: "Not A Key!" });
+  expect(captured?.promptCacheKey).toBe("dave-delivery-v1");
+  auth.getCredentials.mockClear();
+  const transport = vi.fn(), guarded = openAIInference(auth, transport);
+  await expect(guarded({ ...request(), system: "s", user: "x".repeat(MAX_INPUT_BYTES) })).rejects.toMatchObject({ code: "input_limit" });
+  await expect(guarded({ ...request(), user: "💡".repeat(MAX_INPUT_BYTES / 4 + 1) })).rejects.toMatchObject({ code: "input_limit" });
+  expect(transport).not.toHaveBeenCalled();
+  expect(auth.getCredentials).not.toHaveBeenCalled();
+});
+
+it("OpenAI honours a longer timeout for meetings, bounded at five minutes", async () => {
+  vi.useFakeTimers();
+  const never = new Promise<{ accessToken: string; accountId: string; expiresAt: number }>(() => {});
+  const infer = openAIInference({ getCredentials: () => never }, vi.fn());
+  let settled = false;
+  const long = infer({ ...request(), timeoutMs: 300_000 }).catch((e: unknown) => { settled = true; return e; });
+  await vi.advanceTimersByTimeAsync(120_001); expect(settled).toBe(false);
+  await vi.advanceTimersByTimeAsync(180_000); expect(await long).toMatchObject({ code: "timeout" });
+  let clampedDone = false;
+  const clamped = infer({ ...request(), timeoutMs: 10_000_000 }).catch((e: unknown) => { clampedDone = true; return e; });
+  await vi.advanceTimersByTimeAsync(299_000); expect(clampedDone).toBe(false);
+  await vi.advanceTimersByTimeAsync(1_001); expect(await clamped).toMatchObject({ code: "timeout" });
 });
 
 it("OpenAI bounds output and sanitizes restrictions and auth errors without emitting raw errors", async () => {

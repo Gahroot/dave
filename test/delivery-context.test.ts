@@ -129,3 +129,55 @@ describe("bounded delivery context preview", () => {
     expect((await collectDeliveryContext({ ...input, history: [{ ...complete, detail: { outcome: "Changed report", evidence: "" } }] })).fingerprint).not.toBe(packet.fingerprint);
   });
 });
+
+describe("meetings in delivery context", () => {
+  const digest = {
+    promises: [{ text: "Send the API docs", due: "2026-10-02", promisedOn: "2026-09-28" }],
+    painPoints: [{ text: "Full-year export times out", idea: "Background export: exports finish" }],
+    decisions: [{ text: "Archive filter ships next release", decidedOn: "2026-09-28" }],
+  };
+
+  it("adds a bounded digest only when the owner selects meetings", async () => {
+    const { input } = fixture();
+    let reads = 0;
+    const meetings = () => { reads++; return digest; };
+    const without = await collectDeliveryContext({ ...input, meetings });
+    expect(reads).toBe(0);
+    expect(without.sources.some(s => s.category === "meetings")).toBe(false);
+
+    const packet = await collectDeliveryContext({ ...input, meetings, permissions: { ...input.permissions, categories: [...input.permissions.categories, "meetings"] } });
+    expect(reads).toBe(1);
+    const source = packet.sources.find(s => s.category === "meetings");
+    expect(source).toMatchObject({ origin: "user-reported", label: "Meeting digest: open promises, client pain points, decisions" });
+    expect(JSON.parse(source!.text)).toEqual(digest);
+    expect(packet.categories).toContain("meetings");
+    expect(packet.limitations.join(" ")).toContain("not verification");
+    expect(packet.fingerprint).not.toBe(without.fingerprint);
+  });
+
+  it("keeps the digest within 8 KB inside the 64 KB packet, dropping older items", async () => {
+    const { boundedMeetingsDigest, MAX_MEETINGS_DIGEST_BYTES } = await import("../src/model/delivery-context.ts");
+    const many = {
+      promises: Array.from({ length: 60 }, (_, i) => ({ text: `Promise ${i} ${"x".repeat(400)}`, due: null, promisedOn: "2026-09-01" })),
+      painPoints: Array.from({ length: 5 }, (_, i) => ({ text: `Pain ${i}`, idea: "y".repeat(500) })),
+      decisions: [],
+    };
+    const { text, truncated } = boundedMeetingsDigest(many);
+    expect(truncated).toBe(true);
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(MAX_MEETINGS_DIGEST_BYTES);
+    const parsed = JSON.parse(text) as typeof many;
+    expect(parsed.promises[0]?.text.startsWith("Promise 0 ")).toBe(true);
+    expect(parsed.promises[0]!.text.length).toBeLessThanOrEqual(300);
+    expect(parsed.painPoints).toHaveLength(5);
+    const { input } = fixture();
+    const packet = await collectDeliveryContext({ ...input, meetings: () => many, permissions: { ...input.permissions, categories: [...input.permissions.categories, "meetings"] } });
+    expect(packet.limitations.join(" ")).toContain("shortened to 8000 bytes");
+    expect(Buffer.byteLength(JSON.stringify(packet))).toBeLessThanOrEqual(64000);
+  });
+
+  it("refuses a digest that looks like it contains a secret", async () => {
+    const { input } = fixture();
+    await expect(collectDeliveryContext({ ...input, meetings: () => ({ ...digest, promises: [{ text: "Rotate api_key=abc123", due: null, promisedOn: "2026-09-28" }] }),
+      permissions: { ...input.permissions, categories: [...input.permissions.categories, "meetings"] } })).rejects.toThrow("Context text rejected");
+  });
+});

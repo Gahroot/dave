@@ -166,7 +166,7 @@ it("restores and upgrades a genuine populated v5 database without rewriting exis
   expect(db.prepare("SELECT name FROM sqlite_master WHERE name='delivery_contracts'").all()).toEqual([]); db.close();
   db = openDb(backupDir); dbs.push(db);
   expect(db.prepare("SELECT * FROM delivery_events").all()).toEqual(before);
-  expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 9 });
+  expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 10 });
   expect(db.prepare("PRAGMA integrity_check").get()).toMatchObject({ integrity_check: "ok" });
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   expect(deliveryRepo(db).read(id).goal).toEqual(goal);

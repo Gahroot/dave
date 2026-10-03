@@ -28,7 +28,7 @@ try {
  assert.ok(responses.every(s => !s.includes('SYNTHETIC_SECRET_SENTINEL')));
  await keyActivate(page.getByRole('link', { name: 'Choose project goal and planning model', exact: true }));
  await keyActivate(page.getByRole('link', { name: 'Synthetic onboarding', exact: true }));
- await page.getByRole('tab', { name: 'Delivery', exact: true }).click();
+ await page.getByRole('tab', { name: 'Work', exact: true }).click();
  await page.getByLabel('Who breaks the work into pieces', { exact: true }).waitFor();
  assert.equal(await page.getByLabel('Who breaks the work into pieces', { exact: true }).inputValue(), 'openai');
  assert.equal(await page.getByLabel('Which model', { exact: true }).inputValue(), 'gpt-6-astra');
@@ -40,8 +40,8 @@ try {
  await page.getByRole('link', { name: 'Set up or repair provider connection', exact: true }).click();
  await page.getByRole('link', { name: 'Return to setup', exact: true }).click();
  assert.equal(await page.getByLabel('Who uses it', { exact: true }).inputValue(), 'Synthetic members');
- await page.getByRole('tab', { name: 'Context', exact: true }).click();
- await page.getByRole('tab', { name: 'Delivery', exact: true }).click();
+ await page.getByRole('tab', { name: 'Reference', exact: true }).click();
+ await page.getByRole('tab', { name: 'Work', exact: true }).click();
  assert.equal(await page.getByLabel('Who uses it', { exact: true }).inputValue(), 'Synthetic members');
  // Both recoverable server errors and revision conflicts must preserve form drafts.
  for (const status of [503,409]) { await page.route('**/delivery/goal', r => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error: 'Synthetic save conflict; draft retained' }) })); await keyActivate(button('Save delivery settings')); await page.getByRole('alert').waitFor(); assert.equal(await page.getByLabel('Who uses it', { exact: true }).inputValue(), 'Synthetic members'); await page.unroute('**/delivery/goal'); }

@@ -1,9 +1,19 @@
 import { Button, Group, Stack, Text, TextInput } from "@mantine/core";
+import { ChevronLeft, EyeOff, Lightbulb, Pin, Search, UserRound } from "lucide-react";
+import type { ReactNode } from "react";
 import type { InboxItem, PortfolioProject, ProjectSummary } from "../../shared/types.ts";
 import { hasHumanRequest } from "../../core/relevance.ts";
 import { ProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { PageHeader, EmptyState } from "../components/WorkspacePrimitives.tsx";
+import { StatusIcon, StatusMark } from "../components/Status.tsx";
+import { FRESHNESS, hasRail, type StatusSpec } from "../status.ts";
 import { parseRoute, routeLink } from "../navigation.ts";
+
+const INFERRED: StatusSpec = { tone: "violet", icon: Lightbulb, label: "Human request inferred" };
+const PINNED: StatusSpec = { tone: "blue", icon: Pin, label: "Pinned" };
+const HIDDEN: StatusSpec = { tone: "gray", icon: EyeOff, label: "Hidden" };
+/** Middle-truncate a path so the project folder name, the part people recognise, stays visible. */
+const shortPath = (path: string, keep = 2) => { const parts = path.split("/").filter(Boolean); return parts.length > keep + 1 ? `…/${parts.slice(-keep).join("/")}` : path; };
 
 export function ProjectsView({ projects, items, query, selectedId, waiting, onSearch, busyId, onOverride, onCorrect, route }: {
   projects: PortfolioProject[]; items: InboxItem[]; query: string; selectedId: string | null; waiting: boolean; route: string;
@@ -16,16 +26,43 @@ export function ProjectsView({ projects, items, query, selectedId, waiting, onSe
   const q = query.toLocaleLowerCase();
   const filtered = projects.filter(project => (navigation.hidden ? project.override.hidden : !project.override.hidden) && (!waiting || hasHumanRequest(project)) && `${project.name} ${project.canonicalPath}`.toLocaleLowerCase().includes(q)).sort((a, b) => Number(b.override.pinned) - Number(a.override.pinned));
   const destination = (id?: string) => routeLink("projects", { q: query, waiting, hidden: navigation.hidden, id });
-  return <Stack gap="md" className="projects-view" data-has-selection={!!selectedId}>
+  if (selectedId || navigation.invalidSelection) return <div className="projects-view focused-workspace">{selected ? <ProjectWorkspace key={selected.id} project={selected} items={items} route={route} busy={busyId === selected.id} onOverride={onOverride} onCorrect={onCorrect} /> : <EmptyState title="Project unavailable" action={<Button component="a" href={destination()} variant="subtle" color="dark" leftSection={<ChevronLeft size={16} aria-hidden="true" />} data-workspace-back>Back to projects</Button>}>This project is not in the saved directory. Refresh to retry.</EmptyState>}</div>;
+  const visible = projects.filter(project => navigation.hidden ? project.override.hidden : !project.override.hidden);
+  const fresh = { checked: 0, cached: 0, unavailable: 0 };
+  for (const project of visible) fresh[project.scanStatus ?? "cached"] += 1;
+  return <Stack gap="md" className="projects-view">
     <PageHeader title="Projects" />
-    <div className="project-directory-toolbar"><TextInput aria-label="Search projects by name or full path" placeholder="Search projects by name or path" value={query} onChange={e => onSearch(e.currentTarget.value)} />
-    <Group gap="xs"><Button component="a" variant="default" href={routeLink("projects", { q: query, id: selectedId, waiting: !waiting, hidden: navigation.hidden })} aria-pressed={waiting}>Waiting for me</Button><Button component="a" variant="default" href={routeLink("projects", { q: query, id: selectedId, hidden: !navigation.hidden, waiting })} aria-pressed={navigation.hidden}>Hidden projects</Button><Text role="status" size="sm">{filtered.length} matching projects</Text></Group></div>
-    <div className={`workspace-split${selectedId ? " has-selection" : ""}`}>
+    <div className="count-strip" role="group" aria-label="Data freshness">
+      {(["checked", "cached", "unavailable"] as const).filter(key => fresh[key]).map(key => <StatusMark key={key} spec={FRESHNESS[key]}><strong>{fresh[key]}</strong> {FRESHNESS[key].label.toLowerCase()}</StatusMark>)}
+    </div>
+    <div className="project-directory-toolbar"><TextInput aria-label="Search projects by name or full path" placeholder="Search projects by name or path" leftSection={<Search size={16} aria-hidden="true" />} value={query} onChange={e => onSearch(e.currentTarget.value)} />
+    <Group gap="xs"><Button component="a" variant={waiting ? "filled" : "default"} leftSection={<UserRound size={16} aria-hidden="true" />} href={routeLink("projects", { q: query, id: selectedId, waiting: !waiting, hidden: navigation.hidden })} aria-pressed={waiting}>Waiting for me</Button><Button component="a" variant={navigation.hidden ? "filled" : "default"} leftSection={<EyeOff size={16} aria-hidden="true" />} href={routeLink("projects", { q: query, id: selectedId, hidden: !navigation.hidden, waiting })} aria-pressed={navigation.hidden}>Hidden projects</Button><Text role="status" size="sm" c="dimmed">{filtered.length} matching projects</Text></Group></div>
+    <div>
       <div className="workspace-list" aria-label="Project directory">
         {!filtered.length && <EmptyState title="No matching projects" action={<Button component="a" href="#projects" variant="default">Clear filters</Button>} />}
-        {filtered.map(project => <a className="workspace-row" key={project.id} id={`project-row-${project.id}`} aria-label={project.name} href={destination(project.id)} aria-current={selectedId === project.id ? "true" : undefined}><Text fw={600}>{project.name}</Text><Text className="project-directory-next" size="sm" c="dimmed">{project.summary.suggestedNextAction || "No next action recorded"}</Text><Text size="xs">{project.scanStatus ?? "cached"}{project.override.hidden ? " · hidden" : ""}{project.override.pinned ? " · pinned" : ""}{hasHumanRequest(project) ? " · human request inferred" : ""}</Text><Text className="project-directory-path" title={project.canonicalPath} size="xs" c="dimmed">{project.canonicalPath}</Text></a>)}
+        {filtered.map(project => {
+          const scan = project.scanStatus ?? "cached";
+          const inferred = hasHumanRequest(project);
+          // Show exceptions, not defaults: checked rows carry no freshness mark, the header already counts them.
+          // The lead mark is only for exceptions (cached, unavailable); tags below carry pinned and inferred.
+          const lead: StatusSpec | null = scan !== "checked" ? FRESHNESS[scan] : null;
+          const leadIcon: ReactNode = lead ? <StatusIcon spec={lead} /> : <span aria-hidden="true" />;
+          return <a className="workspace-row" key={project.id} id={`project-row-${project.id}`} data-workspace-focus={`project:${project.id}`} aria-label={project.name} href={destination(project.id)} aria-current={selectedId === project.id ? "true" : undefined} data-tone={scan === "unavailable" && hasRail("red") ? "red" : undefined}>
+            <span className="row-main">
+              {leadIcon}
+              <span className="row-title">{project.name}</span>
+              <span className="row-aside project-directory-path" title={project.canonicalPath}>{shortPath(project.canonicalPath, 1)}</span>
+              <span className="row-sub project-directory-next">{project.summary.suggestedNextAction || "No next action recorded"}</span>
+              {(scan !== "checked" || inferred || project.override.pinned || project.override.hidden) && <span className="row-sub row-tags">
+                {scan !== "checked" && <StatusMark spec={FRESHNESS[scan]} />}
+                {project.override.pinned && <StatusMark spec={PINNED} />}
+                {project.override.hidden && <StatusMark spec={HIDDEN} />}
+                {inferred && <StatusMark spec={INFERRED} />}
+              </span>}
+            </span>
+          </a>;
+        })}
       </div>
-      {selected ? <ProjectWorkspace key={selected.id} project={selected} items={items} route={route} busy={busyId === selected.id} onOverride={onOverride} onCorrect={onCorrect} /> : selectedId ? <EmptyState title="Project unavailable" action={<Button component="a" href={destination()} variant="default">Back to projects</Button>}>This project is not in the saved directory. Refresh to retry.</EmptyState> : <EmptyState title="Choose a project">See its next action, delivery work and supporting context.</EmptyState>}
     </div>
   </Stack>;
 }

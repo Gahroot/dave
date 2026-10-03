@@ -11,7 +11,8 @@ export type EvidenceKind =
   | "ezcoder-task"
   | "ezboss-task"
   | "session"
-  | "package";
+  | "package"
+  | "meeting";
 
 /** A pointer to what was actually read. Never a whole file. */
 export type EvidenceRef = {
@@ -180,7 +181,9 @@ export type InboxKind =
   | "agent-question"
   | "ready-for-review"
   | "conflicting-work"
-  | "inspection";
+  | "inspection"
+  | "meeting-promise"
+  | "client-idea";
 
 export type InboxStatus = "open" | "acknowledged" | "dismissed";
 

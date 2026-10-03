@@ -1,12 +1,7 @@
 import { useState } from "react";
 import { Button, Stack, Text } from "@mantine/core";
-import type { QueueEntry } from "../../model/delivery-queue.ts";
+import { CirclePause, CirclePlay } from "lucide-react";
 import { deliveryApi } from "../delivery-api.ts";
-
-/** Presentation only. The shared inbox owns delivery reads. */
-export function DeliveryQueue({ entry }: { entry: QueueEntry }) {
-  return <><Text fw={600}>{entry.step.headline}</Text><Text size="sm">{entry.state === "paused" ? "Paused · " : ""}{entry.step.why}</Text></>;
-}
 
 /** Start/pause control, shown next to a project's own delivery detail. */
 export function EngagementButton({ projectId, revision, engagement, disabled, onSaved }: {
@@ -23,7 +18,7 @@ export function EngagementButton({ projectId, revision, engagement, disabled, on
     finally { setBusy(false); }
   };
   return <Stack gap="xs">
-    <Button variant="default" disabled={busy || disabled} onClick={() => void run()}>
+    <Button variant="default" leftSection={engagement === "active" ? <CirclePause size={16} aria-hidden="true" /> : <CirclePlay size={16} aria-hidden="true" />} disabled={busy || disabled} onClick={() => void run()}>
       {engagement === "active" ? "Pause this one" : engagement === "paused" ? "Pick this back up" : "Start delivering this"}
     </Button>
     {error && <Text size="sm" c="red" role="alert">{error}</Text>}

@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { DisallowedGitCommandError, gitAdapter, runGit } from "../src/adapters/git.ts";
+import { DATED_SUBJECTS_ARGV, datedCommitSubjects, DisallowedGitCommandError, gitAdapter, runGit } from "../src/adapters/git.ts";
 import { tempDir } from "./helpers.ts";
 
 const repo = path.join(tempDir("pcc-git-"), "repo");
@@ -31,6 +31,9 @@ describe("runGit allow-list", () => {
     ["config", "user.name", "x"],
     ["status"], // right verb, wrong argv shape
     ["log", "-1", "--format=%H", "--", "; rm -rf /"],
+    // The meeting follow-up shape, but with a different count or format.
+    ["log", "-31", "--format=%cI%x00%s"],
+    ["log", "-30", "--format=%cI%x00%s%x00%b"],
   ];
 
   it.each(mutating)("refuses `git %s`", async (...argv) => {
@@ -62,6 +65,13 @@ describe("gitAdapter", () => {
     fs.writeFileSync(path.join(repo, "b.txt"), "dirty");
     expect((await gitAdapter().read(repo)).data!.dirty).toBe(true);
     fs.unlinkSync(path.join(repo, "b.txt"));
+  });
+
+  it("reads dated commit subjects with the one fixed follow-up command", async () => {
+    expect(DATED_SUBJECTS_ARGV).toEqual(["log", "-30", "--format=%cI%x00%s"]);
+    const commits = await datedCommitSubjects(repo);
+    expect(commits).toEqual([{ at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/), subject: "first commit" }]);
+    expect(await datedCommitSubjects(tempDir("pcc-norepo-"))).toEqual([]);
   });
 
   it("returns null for a directory that is not a repository", async () => {
