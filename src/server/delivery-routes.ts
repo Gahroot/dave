@@ -9,6 +9,7 @@ import { PlanOutputError, type DeliveryGoal } from "../model/delivery-schema.ts"
 import { deliveryCoordinationRepo } from "../db/delivery-coordination-repo.ts";
 import { CoordinationInputError } from "../model/delivery-coordination.ts";
 import { WIP_LIMIT } from "../model/delivery-queue.ts";
+import { buildRoadmap } from "../model/roadmap.ts";
 import { deliveryPack, PackError } from "../model/delivery-pack.ts";
 import { PlanningFailure, type PlanningInference } from "../providers/openai.ts";
 import { strictObject } from "./provider-routes.ts";
@@ -135,6 +136,20 @@ export function registerDeliveryRoutes(app: FastifyInstance, db: Db, inference: 
   });
   app.get("/api/delivery/queue", async (_req, reply) => {
     try { return { limit: WIP_LIMIT, entries: coordination.queue() }; } catch (error) { return failure(error, reply); }
+  });
+  /** Living roadmap per active project: finish line, progress, and requirements nothing accounts for. */
+  app.get("/api/delivery/roadmaps", async (_req, reply) => {
+    try {
+      const rows = db.prepare("SELECT e.project_id AS projectId,p.name AS projectName FROM delivery_engagements e JOIN projects p ON p.id=e.project_id LEFT JOIN project_overrides o ON o.project_id=e.project_id WHERE e.state='active' AND COALESCE(o.hidden,0)=0 ORDER BY e.started_at,e.project_id").all() as { projectId: string; projectName: string }[];
+      const meetings = meetingStore(db);
+      const roadmaps = rows.flatMap(row => {
+        try {
+          const { state, coordination: data } = coordination.read(row.projectId);
+          return [buildRoadmap({ ...row, state, coordination: data, items: meetings.items({ projectId: row.projectId, kinds: ["commitment", "pain_point", "suggestion"], statuses: ["open", "planned"], limit: 200 }) })];
+        } catch { return []; }
+      });
+      return { roadmaps };
+    } catch (error) { return failure(error, reply); }
   });
   app.get<{ Params: { id: string } }>(`${base}/pack`, async (req, reply) => {
     try {

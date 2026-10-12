@@ -333,3 +333,16 @@ project costs its own data and one row in Issues — never the whole dashboard.
 - Project identity is per canonical path, so moving a project mints a new id.
 - Summaries derive from the opening request of a session, not the full
   transcript, so a session that changed direction mid-way reports its start.
+
+## Next best action and roadmaps
+
+The Inbox opens with one **Do this next** card: the single most valuable action across
+agent runs, delivery steps, inbox items and roadmap gaps, with why it matters and what
+"finished" means. Waiting and paused work never competes. Ranking is in
+`src/ui/top-action.ts` (age only breaks ties inside a tier).
+
+`GET /api/delivery/roadmaps` returns, per active delivery project, the finish line,
+milestone/criterion progress and **gaps**: open promises and client asks from Fathom
+meetings that no milestone, acceptance line or finish criterion covers (word-overlap
+match in `src/model/roadmap.ts`, no model call). Gaps from meetings newer than the plan
+are marked as new. Nothing is closed automatically.

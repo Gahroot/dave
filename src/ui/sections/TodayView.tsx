@@ -11,6 +11,9 @@ import { normalizeInbox, inboxSourceStatus, inboxCounts, groupInbox, inboxDispla
 import { FRESHNESS, INBOX_CATEGORY, INBOX_KIND, NEXT_STEP, RUN_STATUS, hasRail, type StatusSpec } from "../status.ts";
 import { useInboxData } from "../hooks/useInboxData.ts";
 import { relative } from "../format.ts";
+import { pickTopAction } from "../top-action.ts";
+import { NextBestAction } from "../components/NextBestAction.tsx";
+import { RoadmapPanel } from "../components/RoadmapPanel.tsx";
 
 const PAGE_SIZE = 100;
 const FILTERS = [["all", "All"], ["decision", "Needs decision"], ["ready", "Ready to work"], ["waiting", "Waiting"]] as const;
@@ -46,6 +49,7 @@ export function TodayView({ portfolio, busyId, onResolve, onSeen, actions, pause
   const rows = normalizeInbox(portfolio.inbox, source.agents, source.delivery);
   const status = inboxSourceStatus(source.agents, source.delivery, source.errors);
   const counts = inboxCounts(rows);
+  const topAction = pickTopAction(rows, new Date(), source.roadmaps);
   // Page in the order the groups render, so a shared header never collects rows from other pages.
   const filtered = inboxDisplayOrder(rows.filter(row => navigation.filter === "all" || row.category === navigation.filter));
   const visible = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
@@ -105,6 +109,8 @@ export function TodayView({ portfolio, busyId, onResolve, onSeen, actions, pause
   </Stack>;
   return <Stack gap="md">
     <Group justify="space-between" wrap="wrap"><div tabIndex={-1} data-workspace-heading><PageHeader title="Inbox" /></div><Button variant="subtle" color="dark" leftSection={<History size={16} aria-hidden="true" />} aria-pressed={historyOpen} onClick={() => { setHistoryOpen(v => !v); setPage(0); }}>History / snoozed ({history.length})</Button></Group>
+    {!historyOpen && <NextBestAction action={topAction} href={a => a.row ? rowHref(a.row) : routeLink("queue", { delivery: a.gap!.projectId })} />}
+    {!historyOpen && <RoadmapPanel roadmaps={source.roadmaps} />}
     <div className="count-strip" role="group" aria-label="What this inbox covers">
       <StatusMark spec={FRESHNESS.checked}><strong>{coverage?.checked ?? 0}</strong> checked</StatusMark>
       {!!coverage?.cached && <StatusMark spec={FRESHNESS.cached}><strong>{coverage.cached}</strong> cached</StatusMark>}

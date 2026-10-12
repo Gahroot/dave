@@ -150,3 +150,8 @@ it("block/reopen preserve reports and exhaustion never calls the provider or rep
   expect((await f.post(lastUrl, lastBody)).json().duplicate).toBe(true); expect(f.infer).toHaveBeenCalledTimes(1);
   expect((await f.post(f.base + "/cancel", { expectedRevision: state.revision, operationId: "wrong" })).statusCode).toBe(404);
 });
+it("serves an empty roadmap list when no project is engaged", async () => {
+  const f = await fixture();
+  expect((await f.get("/api/delivery/roadmaps")).json()).toEqual({ roadmaps: [] });
+  expect((await f.get("/api/delivery/roadmaps")).statusCode).toBe(200);
+});
