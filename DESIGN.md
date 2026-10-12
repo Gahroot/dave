@@ -55,7 +55,9 @@ Rules:
 
 ## Information architecture
 
-Primary navigation: Inbox, Projects, Agent desk, Meetings. Secondary: Connections, Diagnostics.
+Primary navigation: Focus (the home and default route), Inbox, Projects, Meetings. Secondary: Connections, Diagnostics. The Agent desk is hidden from navigation and shortcuts but its `#agents` route and code remain reachable by direct link; Focus never starts EZcoder or agents, it only offers a copyable brief.
+
+- Focus (`src/ui/sections/focus/`, lazy): top next action (objective, why now, definition of done, blockers, evidence with freshness and confidence, copyable EZcoder brief or a human-step label), Focus queue (one row per project, four readiness levels kept separate), Waiting on you (Accept/Reject proposals), Waiting on others, Recent changes and a sources strip. `#focus?project=<id>` opens the project drill-down (editable outcome, items, gaps, history). `focus-model.ts` holds the pure labels and sorting; states live in `status.ts`.
 
 - Inbox: one typed list with All, Needs decision, Ready to work and Waiting filters. Opening a request or delivery replaces the list at every width. Back restores filter, page, scroll and focus; unavailable items never substitute another selection. Agent items retain safe returns.
 - Projects: compact searchable/filterable directory replaced by the selected workspace. Work is the default and loads delivery lazily. Reference contains editable notes and expandable sources. Legacy `delivery` selects Work; `overview` and `context` select Reference, with `context` opening sources. Keep hidden/pinned/waiting controls and reversible hiding.

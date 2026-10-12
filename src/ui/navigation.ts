@@ -1,9 +1,9 @@
-export type Destination = "queue" | "projects" | "agents" | "meetings" | "connections" | "issues";
+export type Destination = "focus" | "queue" | "projects" | "agents" | "meetings" | "connections" | "issues";
 export type MeetingSection = "promises" | "asks" | "list" | "instructions";
 export type ProjectTab = "overview" | "delivery" | "context";
 export type InboxFilter = "all" | "decision" | "ready" | "waiting";
 export type RunFilter = "all" | "attention" | "active" | "queued" | "finished";
-const destinations = new Set<string>(["queue", "projects", "agents", "meetings", "connections", "issues"]);
+const destinations = new Set<string>(["focus", "queue", "projects", "agents", "meetings", "connections", "issues"]);
 /** Fathom recording ids are digits only. */
 const recordingId = (value: string | null): string | null => value && /^\d{1,20}$/.test(value) ? value : null;
 const identifier = (value: string | null): string | null => value && /^[a-zA-Z0-9_-]{1,200}$/.test(value) ? value : null;
@@ -20,14 +20,14 @@ function inboxPage(value: string | null): number {
 export function parseRoute(hash: string) {
   const [path = "", search = ""] = hash.replace(/^#/, "").split("?");
   const [base, rawRun, ...rest] = path.split("/");
-  const destination: Destination = destinations.has(base!) ? base as Destination : "queue";
+  const destination: Destination = destinations.has(base!) ? base as Destination : "focus";
   const query = new URLSearchParams(search);
   const runId = destination === "agents" && rawRun && /^[a-f0-9-]{36}$/.test(rawRun) && !rest.length ? rawRun : null;
   return {
     destination, runId,
     invalidRun: destination === "agents" && rawRun !== undefined && !runId,
     id: identifier(query.get("id")), item: identifier(query.get("item")), delivery: identifier(query.get("delivery")),
-    invalidSelection: ["id", "item", "delivery"].some(key => query.has(key) && !identifier(query.get(key))) ||
+    invalidSelection: ["id", "item", "delivery", ...(destination === "focus" ? ["project"] : [])].some(key => query.has(key) && !identifier(query.get(key))) ||
       (destination === "meetings" && query.has("rec") && !recordingId(query.get("rec"))),
     rec: destination === "meetings" ? recordingId(query.get("rec")) : null,
     section: oneOf(query.get("section"), ["promises", "asks", "list", "instructions"] as const, "promises"),
@@ -52,7 +52,7 @@ export function routeLink(destination: Destination, values: Record<string, strin
 
 /** No redirects to arbitrary URLs, nested returns, or private text. */
 export function safeReturn(value: string | null): string | null {
-  if (!value || value.length > 2000 || !/^#(queue|projects|agents|meetings)(\?|\/|$)/.test(value)) return null;
+  if (!value || value.length > 2000 || !/^#(focus|queue|projects|agents|meetings)(\?|\/|$)/.test(value)) return null;
   const [path = "", query = ""] = value.slice(1).split("?");
   const params = new URLSearchParams(query);
   params.delete("return");
@@ -62,6 +62,7 @@ export function safeReturn(value: string | null): string | null {
 function parseRouteWithoutReturn(path: string, params: URLSearchParams): string | null {
   const route = parseRoute(`#${path}?${params}`);
   if (route.invalidRun || route.invalidSelection) return null;
+  if (route.destination === "focus") return routeLink("focus", { project: route.project });
   if (route.destination === "queue") return routeLink("queue", { item: route.item, delivery: route.delivery, filter: route.filter === "all" ? null : route.filter, page: route.page > 1 ? String(route.page) : null });
   if (route.destination === "projects") return routeLink("projects", { id: route.id, q: route.q, waiting: route.waiting, hidden: route.hidden, tab: route.tab });
   if (route.destination === "agents") return routeLink("agents", { view: route.view, project: route.project, handoff: route.handoff, meetingItem: route.meetingItem, filter: route.runFilter }, route.runId);

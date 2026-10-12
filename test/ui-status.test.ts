@@ -1,7 +1,8 @@
+import { READINESS_LEVELS } from "../src/intel/types.ts";
 import { describe, expect, it } from "vitest";
 import {
   CHECK_RESULT, CONNECTION, CRITERION_REPORTED, FRESHNESS, INBOX_CATEGORY, INBOX_KIND, ITEM_KIND, ITEM_STATUS, MEETING_STATUS,
-  MILESTONE_STATUS, NEXT_STEP, PROMISE_GROUP, PROMISE_STATE, RUN_STATUS, TONES, checkResult, hasRail, type StatusSpec,
+  MILESTONE_STATUS, NEXT_STEP, EVIDENCE_STATE, READINESS_LEVEL, BASIS, PROPOSAL_KIND, OBJECTIVE_CATEGORY, DELIVERY_FRESHNESS, SOURCE_HEALTH, PROMISE_GROUP, PROMISE_STATE, RUN_STATUS, TONES, checkResult, hasRail, type StatusSpec,
 } from "../src/ui/status.ts";
 
 const maps: Record<string, Readonly<Record<string, StatusSpec>>> = {
@@ -29,6 +30,22 @@ describe("status language", () => {
     expect(FRESHNESS.cached.icon).not.toBe(FRESHNESS.checked.icon);
     expect(CRITERION_REPORTED.met.tone).toBe("gray");
     expect(RUN_STATUS.accepted.label).toMatch(/not merged/);
+  });
+  it("maps every Delivery Intelligence state and keeps its honesty boundaries", () => {
+    expect(Object.keys(EVIDENCE_STATE).sort()).toEqual(["blocked", "implementation_observed", "not_implemented", "unknown", "unverified", "verified"]);
+    expect(Object.keys(READINESS_LEVEL).sort()).toEqual([...READINESS_LEVELS].sort());
+    expect(Object.keys(BASIS).sort()).toEqual(["confirmed", "inferred"]);
+    expect(Object.keys(PROPOSAL_KIND)).toHaveLength(9);
+    expect(Object.keys(OBJECTIVE_CATEGORY)).toHaveLength(8);
+    expect(Object.keys(DELIVERY_FRESHNESS).sort()).toEqual(["aging", "fresh", "never", "stale"]);
+    expect(Object.keys(SOURCE_HEALTH).sort()).toEqual(["degraded", "not_connected", "ok", "unavailable"]);
+    for (const k of ["implementation_observed", "unverified", "unknown", "not_implemented"] as const) expect(EVIDENCE_STATE[k].tone).not.toBe("green");
+    expect(EVIDENCE_STATE.verified.tone).toBe("green");
+    expect(EVIDENCE_STATE.implementation_observed.icon).not.toBe(EVIDENCE_STATE.verified.icon);
+    expect(BASIS.inferred.tone).toBe("violet");
+    expect(READINESS_LEVEL.code_complete.tone).not.toBe("green");
+    expect(READINESS_LEVEL.client_accepted.tone).toBe("green");
+    expect(DELIVERY_FRESHNESS.never.tone).not.toBe(DELIVERY_FRESHNESS.fresh.tone);
   });
   it("only puts rails on states that need the owner or flag a failure", () => {
     expect(hasRail(RUN_STATUS.review.tone)).toBe(true);

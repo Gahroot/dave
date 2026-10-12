@@ -32,7 +32,7 @@ it("upgrades a genuine v9 database additively, rolls back injected failure, and 
     db.close();
 
     db = openDb(home);
-    expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 10 });
+    expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 11 });
     expect(db.prepare("SELECT * FROM project_summaries").all()).toEqual(before);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     const tables = (db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name LIKE 'meeting%' ORDER BY name").all() as { name: string }[]).map(r => r.name);
@@ -59,7 +59,7 @@ it("refuses to open a database written by a newer DAVE", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "dave-meetings-newer-"));
   try {
     const db = openDb(home);
-    db.exec("UPDATE schema_meta SET version = 11");
+    db.exec("UPDATE schema_meta SET version = 12");
     db.close();
     expect(() => openDb(home)).toThrow("Database is newer than this application");
   } finally { fs.rmSync(home, { recursive: true, force: true }); }

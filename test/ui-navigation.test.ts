@@ -57,6 +57,12 @@ describe("workspace navigation", () => {
   it("round-trips search and validated tabs", () => {
     const route = parseRoute(routeLink("projects", { id: "abc", q: "name & path", tab: "context", waiting: true }));
     expect(route).toMatchObject({ id: "abc", q: "name & path", tab: "context", waiting: true });
-    expect(parseRoute("").destination).toBe("queue");
+    expect(parseRoute("").destination).toBe("focus");
+    expect(parseRoute("#nonsense").destination).toBe("focus");
+    expect(parseRoute("#queue").destination).toBe("queue");
+    expect(parseRoute("#agents").destination).toBe("agents");
+    expect(parseRoute("#focus?project=abc_1")).toMatchObject({ destination: "focus", project: "abc_1", invalidSelection: false });
+    expect(parseRoute("#focus?project=../x").invalidSelection).toBe(true);
+    expect(parseRoute("#focus?project=../x").project).toBeNull();
   });
 });

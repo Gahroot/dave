@@ -358,3 +358,14 @@ p.inbox-cluster-note { display: flex; flex-wrap: wrap; align-items: center; gap:
 .connection-title { display: flex; align-items: center; gap: 8px; }
 .issue-source .result-row details { margin-top: 4px; }
 @media (forced-colors: active) { .connection-card { border-top-color: CanvasText !important; } }
+
+/* Focus (Delivery Intelligence home) */
+.focus-view section + section { margin-top: 8px; }
+.focus-view h2 { margin: 0 0 8px; }
+.plain-list { list-style: none; margin: 0; padding: 0; }
+.focus-row { padding: 10px 12px; border-bottom: 1px solid var(--workspace-border); }
+.focus-top { max-width: 960px; }
+.readiness-strip { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.provenance-list .provenance-quote { margin: 4px 0; padding-inline-start: 10px; border-inline-start: 2px solid var(--workspace-border); font-size: 13px; color: var(--workspace-muted); }
+.done-box { display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--workspace-muted); border-radius: 3px; vertical-align: -1px; }
+.sources-strip { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 4px; }

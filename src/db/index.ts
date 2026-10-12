@@ -4,6 +4,7 @@ import { migrateEngagements } from "./migrations/007-engagements.ts";
 import { migrateHandoffSentAt } from "./migrations/008-handoff-sent-at.ts";
 import { migrateAgentPlatform } from "./migrations/009-agent-platform.ts";
 import { migrateMeetings } from "./migrations/010-meetings.ts";
+import { migrateIntel } from "./migrations/011-intel.ts";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -12,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 const SCHEMA = fileURLToPath(new URL("./schema.sql", import.meta.url));
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 const ATTENTION = fileURLToPath(new URL("./migrations/004_attention.sql", import.meta.url));
 
 /**
@@ -65,6 +66,7 @@ export function openDb(appHome: string, beforeMigrationCommit?: (db: Db) => void
       if (previous < 8) migrateHandoffSentAt(db);
       if (previous < 9) migrateAgentPlatform(db);
       if (previous < 10) migrateMeetings(db);
+      if (previous < 11) migrateIntel(db);
       if (previous !== SCHEMA_VERSION) {
         db.exec("DELETE FROM schema_meta");
         db.prepare("INSERT INTO schema_meta (version) VALUES (?)").run(SCHEMA_VERSION);

@@ -16,6 +16,7 @@ import { useWorkspaceReturn } from "./hooks/useWorkspaceReturn.ts";
 
 const AgentPlatform = lazy(() => import("./sections/AgentPlatform.tsx").then(m => ({ default: m.AgentPlatform })));
 const MeetingsView = lazy(() => import("./sections/MeetingsView.tsx").then(m => ({ default: m.MeetingsView })));
+const FocusRoute = lazy(() => import("./sections/focus/FocusView.tsx").then(m => ({ default: m.FocusRoute })));
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000), headers: init?.body ? { "content-type": "application/json" } : undefined });
@@ -148,7 +149,8 @@ export function App() {
           {(error || portfolio?.stale) && <Alert color="red" icon={<IconStale size={18} aria-hidden="true" />} title="Showing saved information" role="alert"><Group gap="xs" align="center">{error ?? portfolio?.refreshError}<Button variant="default" size="xs" leftSection={<IconRefresh size={14} aria-hidden="true" />} onClick={() => void load(true)}>Retry</Button></Group></Alert>}
           {pending && <Alert color="blue" icon={<IconUpdate size={18} aria-hidden="true" />} title="Updated information is ready" role="status"><Group gap="xs" align="center">Your focused item has stayed in place.<Button size="xs" onClick={() => { if (!document.querySelector("[data-summary-editing]")) { setPortfolio(pending); setPending(null); } }}>Apply update</Button></Group></Alert>}
           {(navigation.invalidSelection || navigation.invalidRun) && <Alert color="orange" icon={<IconInvalid size={18} aria-hidden="true" />} title="Invalid destination" role="alert">This link does not identify available work. Choose an item from the directory.</Alert>}
-          {!portfolio && <Text role="status">{busy ? "Loading your portfolio…" : "No snapshot loaded."}</Text>}
+          {!portfolio && tab !== "focus" && <Text role="status">{busy ? "Loading your portfolio…" : "No snapshot loaded."}</Text>}
+          {tab === "focus" && <Suspense fallback={<Text role="status">Loading focus…</Text>}><FocusRoute route={route} paused={paused} /></Suspense>}
           {tab === "connections" && <ConnectionsView />}
           {tab === "agents" && <Suspense fallback={<Text role="status">Loading agent desk…</Text>}><AgentPlatform paused={paused} /></Suspense>}
           {tab === "meetings" && <Suspense fallback={<Text role="status">Loading meetings…</Text>}><MeetingsView route={route} paused={paused} refreshedAt={portfolio?.generatedAt ?? null} /></Suspense>}

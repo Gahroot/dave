@@ -16,12 +16,14 @@ import { createMeetingService, type MeetingServiceOptions } from "../meetings/se
 import { projectCatalog } from "../meetings/extract.ts";
 import { applyInboxAction, applyMeetingAttention } from "../meetings/attention.ts";
 import { meetingStore } from "../meetings/store.ts";
+import { intelService } from "../intel/service.ts";
+import { registerIntelRoutes } from "./intel-routes.ts";
 import { registerMeetingRoutes } from "./meeting-routes.ts";
 import { localBrowserOrigins, registerRequestGuard } from "./request-guard.ts";
 
 const DIST = fileURLToPath(new URL("../../dist", import.meta.url));
 
-export async function buildServer(paths = sourcePaths(), options: { browserOrigins?: string[]; providers?: ProviderService; agentOptions?: AgentOptions; meetings?: MeetingServiceOptions; startMeetingScheduler?: boolean } = {}) {
+export async function buildServer(paths = sourcePaths(), options: { browserOrigins?: string[]; providers?: ProviderService; agentOptions?: AgentOptions; meetings?: MeetingServiceOptions; startMeetingScheduler?: boolean; startIntelScheduler?: boolean } = {}) {
   const app = Fastify({ logger: false });
   registerRequestGuard(app, options.browserOrigins ?? localBrowserOrigins(Number(process.env.PORT ?? 4317)));
   const db = openDb(paths.appHome);
@@ -34,6 +36,9 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
   try { registerAgentRoutes(app, db, paths.appHome, options.agentOptions); }
   catch(e) { await app.close(); throw e; }
   const repo = makeRepo(db);
+  // Delivery Intelligence: deterministic reconcile + prioritiser. Reads only; never launches agents.
+  const intel = intelService(db, { latest: () => repo.latest() });
+  app.addHook("onClose", async () => { intel.close(); });
   // Meeting promises and client ideas join the Inbox inside refresh's own save
   // step, and again whenever meetings change between refreshes.
   const meetingItems = meetingStore(db);
@@ -55,13 +60,18 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
     openAIConnected: () => providers.status().openai.state === "connected",
     projects: () => projectCatalog(repo.latest()),
     portfolioProjects: () => { const latest = repo.latest(); return latest ? [...latest.active, ...latest.other] : []; },
-    onChanged: () => rebuildMeetingAttention(),
+    onChanged: () => {
+      rebuildMeetingAttention();
+      try { intel.reconcileSync(); } catch { /* intelligence must never break meeting sync */ }
+    },
     ...options.meetings,
   });
   app.addHook("onClose", async () => { await meetings.close(); });
   registerMeetingRoutes(app, meetings);
+  registerIntelRoutes(app, intel);
   // Only the real server entry point polls Fathom; tests never start the timer.
   if (options.startMeetingScheduler) meetings.startScheduler();
+  if (options.startIntelScheduler) intel.startScheduler();
 
   if (fs.existsSync(path.join(DIST, "index.html"))) {
     await app.register(fastifyStatic, { root: DIST });
@@ -78,7 +88,7 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT ?? 4317);
   // Explicit dev proxy origins only; never trust X-Forwarded-* supplied by clients.
   const extraOrigins = process.env.PCC_BROWSER_ORIGINS?.split(",").map((origin) => origin.trim()).filter(Boolean) ?? [];
-  const app = await buildServer(sourcePaths(), { browserOrigins: [...localBrowserOrigins(port), ...extraOrigins], startMeetingScheduler: true });
+  const app = await buildServer(sourcePaths(), { browserOrigins: [...localBrowserOrigins(port), ...extraOrigins], startMeetingScheduler: true, startIntelScheduler: true });
   await app.listen({ port, host: "127.0.0.1" });
   console.log(`Portfolio Command Center → http://127.0.0.1:${port}`);
   let stopping = false;

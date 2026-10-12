@@ -24,7 +24,7 @@ it("upgrades a genuine v8 database additively, rolls back injected failure, and 
     expect(db.prepare("SELECT name FROM sqlite_schema WHERE name LIKE 'agent_%'").all()).toEqual([]);
     expect(db.prepare("SELECT * FROM project_summaries").all()).toEqual(before); db.close();
     db = openDb(home);
-    expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 10 });
+    expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 11 });
     expect(db.prepare("SELECT * FROM project_summaries").all()).toEqual(before);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(db.prepare("SELECT enabled,paused FROM agent_settings").get()).toMatchObject({ enabled: 0, paused: 1 }); db.close();

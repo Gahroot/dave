@@ -2,12 +2,14 @@ import {
   Ban, Bot, CalendarClock, CircleCheck, CircleDashed, CircleDot, CircleHelp, CirclePlay, CircleSlash, CircleStop, CircleX,
   Clock, ClockAlert, CloudOff, Eye, Flag, Gavel, Hand, Handshake, KeyRound, Lightbulb, ListChecks, LoaderCircle,
   MessageCircleQuestion, MessageSquareWarning, PackageCheck, Plug, Send, TriangleAlert, Unplug, UserCheck, type LucideIcon,
+  Code, FilePlus, FlaskConical, GraduationCap, Repeat, Rocket, Search, ShieldCheck, Stamp, UserRound, Wrench,
 } from "lucide-react";
 import type { RunStatus } from "../agents/types.ts";
 import type { InboxKind } from "../shared/types.ts";
 import type { NextStepKind } from "../model/delivery-next-step.ts";
 import type { ItemKind, ItemStatus, MeetingStatus, PromiseStateName } from "../meetings/types.ts";
 import type { PromiseGroup } from "./meetings-model.ts";
+import type { Basis, EvidenceState, Freshness as IntelFreshness, ObjectiveCategory, ProposalKind, ReadinessLevel, SourceHealth } from "../intel/types.ts";
 
 /**
  * The one status language. Tone answers "whose move is it", the icon shape answers
@@ -153,4 +155,65 @@ export const CONNECTION: Readonly<Record<ConnectionState, StatusSpec>> = {
   error: { tone: "red", icon: CircleX, label: "Unavailable" },
   "invalid-key": { tone: "red", icon: KeyRound, label: "Key rejected" },
   paused: { tone: "gray", icon: Clock, label: "Paused" },
+};
+
+/** Delivery Intelligence. Evidence states stay apart: observed code is never drawn like verified. */
+export const EVIDENCE_STATE: Readonly<Record<EvidenceState, StatusSpec>> = {
+  not_implemented: { tone: "gray", icon: CircleDashed, label: "Not implemented" },
+  implementation_observed: { tone: "blue", icon: Code, label: "Implementation observed" },
+  unverified: { tone: "violet", icon: CircleHelp, label: "Unverified" },
+  verified: { tone: "green", icon: ShieldCheck, label: "Verified" },
+  blocked: { tone: "red", icon: Ban, label: "Blocked" },
+  unknown: { tone: "gray", icon: CircleHelp, label: "Unknown" },
+};
+
+/** Reached means evidenced at that level only; the four levels are never merged into "done". */
+export const READINESS_LEVEL: Readonly<Record<ReadinessLevel, StatusSpec>> = {
+  code_complete: { tone: "blue", icon: Code, label: "Code complete" },
+  deployed: { tone: "blue", icon: Rocket, label: "Deployed" },
+  usable_by_client: { tone: "blue", icon: UserRound, label: "Usable by client" },
+  client_accepted: { tone: "green", icon: UserCheck, label: "Client accepted" },
+};
+
+export const BASIS: Readonly<Record<Basis, StatusSpec>> = {
+  confirmed: { tone: "green", icon: UserCheck, label: "Confirmed" },
+  inferred: { tone: "violet", icon: Lightbulb, label: "Inferred by DAVE" },
+};
+
+export const PROPOSAL_KIND: Readonly<Record<ProposalKind, StatusSpec>> = {
+  outcome_draft: { tone: "amber", icon: FilePlus, label: "Draft outcome" },
+  new_requirement: { tone: "amber", icon: ListChecks, label: "New requirement" },
+  scope_change: { tone: "amber", icon: Gavel, label: "Scope change" },
+  deadline_change: { tone: "amber", icon: CalendarClock, label: "Deadline change" },
+  new_commitment: { tone: "amber", icon: Handshake, label: "New commitment" },
+  mark_complete: { tone: "violet", icon: CircleHelp, label: "Looks complete?" },
+  mark_obsolete: { tone: "violet", icon: CircleSlash, label: "Looks obsolete?" },
+  conflict: { tone: "red", icon: TriangleAlert, label: "Conflict" },
+  clarification: { tone: "amber", icon: MessageCircleQuestion, label: "Clarification" },
+};
+
+export const OBJECTIVE_CATEGORY: Readonly<Record<ObjectiveCategory, StatusSpec>> = {
+  coding: { tone: "blue", icon: Code, label: "Coding" },
+  investigation: { tone: "blue", icon: Search, label: "Investigation" },
+  client_action: { tone: "amber", icon: UserRound, label: "Client action" },
+  access_configuration: { tone: "amber", icon: KeyRound, label: "Access or configuration" },
+  testing: { tone: "blue", icon: FlaskConical, label: "Testing" },
+  deployment: { tone: "blue", icon: Rocket, label: "Deployment" },
+  training: { tone: "blue", icon: GraduationCap, label: "Training" },
+  approval: { tone: "amber", icon: Stamp, label: "Approval" },
+};
+
+/** Age of project knowledge. Never is drawn like unavailable, not like fresh. */
+export const DELIVERY_FRESHNESS: Readonly<Record<IntelFreshness, StatusSpec>> = {
+  fresh: { tone: "green", icon: CircleCheck, label: "Fresh" },
+  aging: { tone: "gray", icon: Repeat, label: "Aging" },
+  stale: { tone: "amber", icon: ClockAlert, label: "Stale" },
+  never: { tone: "gray", icon: CircleDashed, label: "Never checked" },
+};
+
+export const SOURCE_HEALTH: Readonly<Record<SourceHealth["state"], StatusSpec>> = {
+  ok: { tone: "green", icon: CircleCheck, label: "Synced" },
+  degraded: { tone: "amber", icon: Wrench, label: "Degraded" },
+  unavailable: { tone: "red", icon: CloudOff, label: "Unavailable" },
+  not_connected: { tone: "gray", icon: Unplug, label: "Not connected" },
 };
