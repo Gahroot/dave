@@ -1,7 +1,8 @@
 import type {
   Blocker, DeliveryStage, EvidenceState, IntelItem, Objective, ObjectiveCategory, Provenance, ReadinessLevel,
 } from "./types.ts";
-import { hash, significantTokens } from "./store.ts";
+import { hash } from "./store.ts";
+import { blockerIndex, dayNumber, isOpen as open, laneOf } from "./scope.ts";
 
 /**
  * Deterministic next-objective rules (no model). DAVE only decides WHAT should happen and WHY; the brief is
@@ -20,7 +21,6 @@ export type PrioritizeProject = {
 };
 export type ProjectObjectives = { objective: Objective | null; others: Objective[] };
 
-const GENERIC = new Set(["credential", "access", "api", "key", "client", "send", "provide", "account", "login", "password", "token", "secret", "permission", "sandbox", "share", "give", "get", "wait", "waiting", "require", "depend", "invite"]);
 const RESOURCE = /(credential|api[ -]?key|password|login|access|token|permission|sandbox|account|secret|certificate|dns|whitelist|invite)/i;
 
 export function classify(text: string): ObjectiveCategory {
@@ -36,8 +36,6 @@ export function classify(text: string): ObjectiveCategory {
 const HUMAN_ONLY = new Set<ObjectiveCategory>(["client_action", "access_configuration", "training", "approval"]);
 export const isHumanOnly = (c: ObjectiveCategory): boolean => HUMAN_ONLY.has(c);
 
-const open = (i: IntelItem): boolean => i.status === "open" || i.status === "in_progress";
-const dayNumber = (iso: string): number => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / 86_400_000);
 export const daysUntil = (due: string, now: Date): number => dayNumber(due) - dayNumber(now.toISOString());
 
 type Reason = Objective["scoreReasons"][number];
@@ -60,16 +58,10 @@ type Candidate = Omit<Objective, "projectId" | "projectName" | "stage" | "score"
 function candidates(p: PrioritizeProject, now: Date): Candidate[] {
   const out: Candidate[] = [];
   const byId = new Map(p.items.map((i) => [i.id, i]));
-  const work = p.items.filter((i) => (i.kind === "requirement" || i.kind === "milestone") && open(i));
-  const openBlockers = p.items.filter((i) => i.kind === "blocker" && open(i) && (i.owner === "client" || i.owner === "third_party"));
-
-  const blockedBy = (b: IntelItem): IntelItem[] => {
-    const bt = new Set(significantTokens(b.title).filter((t) => !GENERIC.has(t)));
-    return p.items.filter((i) => (i.kind === "requirement" || i.kind === "milestone" || (i.kind === "commitment" && i.owner !== "client")) && open(i) &&
-      (i.dependsOn.includes(b.id) || significantTokens(`${i.title} ${i.detail ?? ""}`).some((t) => bt.has(t))));
-  };
-  const blockerOf = new Map<string, IntelItem[]>();
-  for (const b of openBlockers) for (const i of blockedBy(b)) blockerOf.set(i.id, [...(blockerOf.get(i.id) ?? []), b]);
+  // Only finish-line work is build work; bells and whistles (extra / phase 2) never become a build objective.
+  const work = p.items.filter((i) => (i.kind === "requirement" || i.kind === "milestone") && open(i) && laneOf(i).lane === "finish_line");
+  const { openBlockers, blockedBy: heldUp, blockerOf } = blockerIndex(p.items);
+  const blockedBy = (b: IntelItem): IntelItem[] => heldUp.get(b.id) ?? [];
 
   // 1. Client / third-party blockers: get access instead of coding a blocked feature.
   for (const b of openBlockers) {

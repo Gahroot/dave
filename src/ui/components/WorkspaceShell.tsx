@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Button, Drawer } from "@mantine/core";
+import { ActionIcon, Drawer } from "@mantine/core";
 import { Inbox, Folder, Target, Handshake, Plug, Activity, Menu } from "lucide-react";
 import { routeLink, type Destination } from "../navigation.ts";
 
@@ -21,7 +21,7 @@ export function WorkspaceShell({ destination, actions, children }: { destination
     <a className="skip-link" href="#main-content" onClick={e => { e.preventDefault(); document.getElementById("main-content")?.focus(); }}>Skip to content</a>
     <aside className="workspace-sidebar"><a className="workspace-brand" href="#focus">DAVE</a>{navigation}</aside>
     <div className="workspace-body">
-      <header className="workspace-header"><span className="workspace-breadcrumb">Workspace <span>/</span> {destinations.find(item => item.id === destination)?.label ?? "Agent desk"}</span><div className="mobile-navigation"><Button variant="default" leftSection={<Menu size={18} aria-hidden="true" />} onClick={() => setOpened(true)} aria-expanded={opened}>Menu</Button><strong>DAVE</strong></div>{actions}</header>
+      <header className="workspace-header"><span className="workspace-breadcrumb">Workspace <span>/</span> {destinations.find(item => item.id === destination)?.label ?? "Agent desk"}</span><div className="mobile-navigation"><ActionIcon className="mobile-menu-button" variant="subtle" color="dark" size={44} radius="md" aria-label="Menu" aria-expanded={opened} onClick={() => setOpened(true)}><Menu size={22} strokeWidth={2} aria-hidden="true" /></ActionIcon><strong className="mobile-brand">DAVE</strong></div>{actions}</header>
       <main id="main-content" tabIndex={-1} className="workspace-content">{children}</main>
     </div>
     <Drawer opened={opened} onClose={() => setOpened(false)} title="DAVE navigation" size="xs">{navigation}</Drawer>

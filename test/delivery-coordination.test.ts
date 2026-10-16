@@ -2,7 +2,7 @@ import { afterEach, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { openDb } from "../src/db/index.ts";
+import { SCHEMA_VERSION, openDb } from "../src/db/index.ts";
 import { migrateDelivery } from "../src/db/migrations/005-delivery.ts";
 import { repo } from "../src/db/repo.ts";
 import { deliveryRepo } from "../src/db/delivery-repo.ts";
@@ -166,7 +166,7 @@ it("restores and upgrades a genuine populated v5 database without rewriting exis
   expect(db.prepare("SELECT name FROM sqlite_master WHERE name='delivery_contracts'").all()).toEqual([]); db.close();
   db = openDb(backupDir); dbs.push(db);
   expect(db.prepare("SELECT * FROM delivery_events").all()).toEqual(before);
-  expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 11 });
+  expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: SCHEMA_VERSION });
   expect(db.prepare("PRAGMA integrity_check").get()).toMatchObject({ integrity_check: "ok" });
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   expect(deliveryRepo(db).read(id).goal).toEqual(goal);

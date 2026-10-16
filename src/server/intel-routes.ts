@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { IntelError, EVIDENCE_STATES, ITEM_KINDS, ITEM_STATUSES, OWNERS, type IntelService, type ItemFields } from "../intel/service.ts";
-import { DELIVERY_STAGES, READINESS_LEVELS, type DeliveryStage, type ItemKind, type Owner, type ReadinessLevel } from "../intel/types.ts";
+import { IntelError, EVIDENCE_STATES, ITEM_KINDS, ITEM_STATUSES, MAX_ACCEPTANCE_CRITERIA, OWNERS, type FinishLineInput, type IntelService, type ItemFields } from "../intel/service.ts";
+import { DELIVERY_STAGES, LANES, MARKABLE_STEPS, READINESS_LEVELS, type DeliveryStage, type ItemKind, type Lane, type MarkableStep, type Owner, type ReadinessLevel } from "../intel/types.ts";
 import { strictObject } from "./provider-routes.ts";
 
 const bad = (message = "Invalid request"): never => { throw new IntelError("invalid", message); };
@@ -25,10 +25,32 @@ function date(v: unknown): string | null {
 function oneOf<T extends string>(v: unknown, allowed: readonly T[]): T {
   return typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : bad();
 }
+function shape(v: unknown, required: string[], optional: string[] = []): Record<string, unknown> {
+  try { strictObject(v, required, optional); } catch { return bad(); }
+  return v;
+}
 function body(req: { body: unknown }, required: string[], optional: string[] = []): Record<string, unknown> {
-  const b = req.body ?? {};
-  try { strictObject(b, required, optional); } catch { return bad(); }
-  return b as Record<string, unknown>;
+  return shape(req.body ?? {}, required, optional);
+}
+function bool(v: unknown): boolean {
+  return typeof v === "boolean" ? v : bad();
+}
+function nullableText(v: unknown, max: number): string | null {
+  return v === null ? null : text(v, max);
+}
+const MAX_FINISH_LINE_ITEMS = 50;
+const MAX_SENT_IDS = 100;
+function finishLineItems(v: unknown): FinishLineInput[] {
+  if (!Array.isArray(v) || v.length < 1 || v.length > MAX_FINISH_LINE_ITEMS) return bad();
+  return v.map((raw) => {
+    const e = shape(raw, ["title"], ["detail", "acceptance", "goal"]);
+    return {
+      title: text(e.title, 300),
+      ...(e.detail !== undefined ? { detail: nullableText(e.detail, 2000) } : {}),
+      ...(e.acceptance !== undefined ? { acceptance: list(e.acceptance, 12, 400) } : {}),
+      ...(e.goal !== undefined ? { goal: nullableText(e.goal, 300) } : {}),
+    };
+  });
 }
 
 export function registerIntelRoutes(app: FastifyInstance, intel: IntelService) {
@@ -61,10 +83,58 @@ export function registerIntelRoutes(app: FastifyInstance, intel: IntelService) {
   app.put<{ Params: { id: string } }>("/api/intel/projects/:id/outcome", async (req, reply) => {
     try {
       const id = project(req.params.id);
-      const b = body(req, ["desiredOutcome", "acceptanceCriteria"], ["stage", "lock"]);
+      const b = body(req, ["desiredOutcome", "acceptanceCriteria"], ["stage", "lock", "targetDate", "startDate"]);
       const stage = b.stage === undefined ? undefined : oneOf<DeliveryStage>(b.stage, DELIVERY_STAGES);
-      if (b.lock !== undefined && typeof b.lock !== "boolean") bad();
-      return intel.putOutcome(id, { desiredOutcome: text(b.desiredOutcome, 1000), acceptanceCriteria: list(b.acceptanceCriteria, 20, 500), ...(stage ? { stage } : {}), ...(b.lock !== undefined ? { lock: b.lock as boolean } : {}) });
+      return intel.putOutcome(id, {
+        desiredOutcome: text(b.desiredOutcome, 1000), acceptanceCriteria: list(b.acceptanceCriteria, MAX_ACCEPTANCE_CRITERIA, 500),
+        ...(stage ? { stage } : {}), ...(b.lock !== undefined ? { lock: bool(b.lock) } : {}),
+        ...(b.targetDate !== undefined ? { targetDate: date(b.targetDate) } : {}),
+        ...(b.startDate !== undefined ? { startDate: date(b.startDate) } : {}),
+      });
+    } catch (e) { return fail(e, reply); }
+  });
+
+  app.put<{ Params: { id: string } }>("/api/intel/projects/:id/schedule", async (req, reply) => {
+    try {
+      const id = project(req.params.id);
+      const b = body(req, ["targetDate"], ["startDate"]);
+      return intel.setSchedule(id, { targetDate: date(b.targetDate), ...(b.startDate !== undefined ? { startDate: date(b.startDate) } : {}) });
+    } catch (e) { return fail(e, reply); }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/intel/projects/:id/steps", async (req, reply) => {
+    try {
+      const id = project(req.params.id);
+      const b = body(req, ["step", "reached"]);
+      return intel.setStep(id, oneOf<MarkableStep>(b.step, MARKABLE_STEPS), bool(b.reached));
+    } catch (e) { return fail(e, reply); }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/intel/projects/:id/demo", async (req, reply) => {
+    try {
+      const id = project(req.params.id);
+      body(req, []);
+      return intel.markDemo(id);
+    } catch (e) { return fail(e, reply); }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/intel/projects/:id/tasks/sent", async (req, reply) => {
+    try {
+      const id = project(req.params.id);
+      const b = body(req, ["itemIds", "sent"]);
+      const ids = list(b.itemIds, MAX_SENT_IDS, 16).map(hex);
+      if (!ids.length) bad();
+      return intel.markSent(id, ids, bool(b.sent));
+    } catch (e) { return fail(e, reply); }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/intel/projects/:id/finish-line", async (req, reply) => {
+    try {
+      const id = project(req.params.id);
+      const b = body(req, ["items"], ["acceptance"]);
+      const items = finishLineItems(b.items);
+      const acceptance = b.acceptance === undefined ? [] : list(b.acceptance, MAX_ACCEPTANCE_CRITERIA, 500);
+      return intel.addFinishLineItems(id, items, acceptance);
     } catch (e) { return fail(e, reply); }
   });
 
@@ -86,7 +156,7 @@ export function registerIntelRoutes(app: FastifyInstance, intel: IntelService) {
   app.patch<{ Params: { itemId: string } }>("/api/intel/items/:itemId", async (req, reply) => {
     try {
       const id = hex(req.params.itemId);
-      const b = body(req, [], ["title", "detail", "status", "evidenceState", "owner", "dueDate", "acceptance", "locked", "readinessReached", "confirm"]);
+      const b = body(req, [], ["title", "detail", "status", "evidenceState", "owner", "dueDate", "acceptance", "locked", "readinessReached", "confirm", "lane", "goal"]);
       const f: ItemFields = {};
       if (b.title !== undefined) f.title = text(b.title, 300);
       if (b.detail !== undefined) f.detail = b.detail === null ? null : text(b.detail, 2000);
@@ -95,10 +165,28 @@ export function registerIntelRoutes(app: FastifyInstance, intel: IntelService) {
       if (b.owner !== undefined) f.owner = oneOf<Owner>(b.owner, OWNERS);
       if (b.dueDate !== undefined) f.dueDate = date(b.dueDate);
       if (b.acceptance !== undefined) f.acceptance = list(b.acceptance, 12, 400);
-      if (b.locked !== undefined) { if (typeof b.locked !== "boolean") bad(); f.locked = b.locked as boolean; }
-      if (b.confirm !== undefined) { if (typeof b.confirm !== "boolean") bad(); f.confirm = b.confirm as boolean; }
+      if (b.locked !== undefined) f.locked = bool(b.locked);
+      if (b.confirm !== undefined) f.confirm = bool(b.confirm);
       if (b.readinessReached !== undefined) f.readinessReached = b.readinessReached === null ? null : oneOf<ReadinessLevel>(b.readinessReached, READINESS_LEVELS);
+      if (b.lane !== undefined) f.lane = b.lane === null ? null : oneOf<Lane>(b.lane, LANES);
+      if (b.goal !== undefined) f.goal = nullableText(b.goal, 300);
       return intel.patchItem(id, f);
+    } catch (e) { return fail(e, reply); }
+  });
+
+  app.post<{ Params: { itemId: string } }>("/api/intel/items/:itemId/verify", async (req, reply) => {
+    try {
+      const id = hex(req.params.itemId);
+      body(req, []);
+      return intel.verifyItem(id);
+    } catch (e) { return fail(e, reply); }
+  });
+
+  app.post<{ Params: { itemId: string } }>("/api/intel/items/:itemId/reopen", async (req, reply) => {
+    try {
+      const id = hex(req.params.itemId);
+      const b = body(req, [], ["note"]);
+      return intel.reopenItem(id, b.note === undefined || b.note === null ? null : text(b.note, 500));
     } catch (e) { return fail(e, reply); }
   });
 
@@ -106,9 +194,10 @@ export function registerIntelRoutes(app: FastifyInstance, intel: IntelService) {
     app.post<{ Params: { id: string } }>(`/api/intel/proposals/:id/${action}`, async (req, reply) => {
       try {
         const id = hex(req.params.id);
-        const b = body(req, [], ["note"]);
+        const b = body(req, [], action === "accept" ? ["note", "lane"] : ["note"]);
         const note = b.note === undefined || b.note === null ? null : text(b.note, 500);
-        return intel.resolveProposal(id, action === "accept", note);
+        const lane = b.lane === undefined ? undefined : oneOf<Lane>(b.lane, LANES);
+        return intel.resolveProposal(id, action === "accept", note, lane);
       } catch (e) { return fail(e, reply); }
     });
   }

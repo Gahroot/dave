@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { openDb } from "../src/db/index.ts";
+import { SCHEMA_VERSION, openDb } from "../src/db/index.ts";
 import { migrateDelivery } from "../src/db/migrations/005-delivery.ts";
 import { migrateDeliveryCoordination } from "../src/db/migrations/006-delivery-coordination.ts";
 import { migrateEngagements } from "../src/db/migrations/007-engagements.ts";
@@ -24,7 +24,7 @@ it("upgrades a genuine v8 database additively, rolls back injected failure, and 
     expect(db.prepare("SELECT name FROM sqlite_schema WHERE name LIKE 'agent_%'").all()).toEqual([]);
     expect(db.prepare("SELECT * FROM project_summaries").all()).toEqual(before); db.close();
     db = openDb(home);
-    expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 11 });
+    expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: SCHEMA_VERSION });
     expect(db.prepare("SELECT * FROM project_summaries").all()).toEqual(before);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(db.prepare("SELECT enabled,paused FROM agent_settings").get()).toMatchObject({ enabled: 0, paused: 1 }); db.close();

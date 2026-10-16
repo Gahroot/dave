@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Group, List, Modal, NativeSelect, Stack, Text, Title } from "@mantine/core";
-import { Calendar, ExternalLink, Sparkles, Trash2, Users } from "lucide-react";
-import { CountPill, StatusIcon, StatusMark } from "../components/Status.tsx";
+import { Alert, Button, Checkbox, Group, List, Modal, NativeSelect, Stack, Text } from "@mantine/core";
+import { Calendar, ExternalLink, FileText, Folder, Sparkles, Trash2, Users } from "lucide-react";
+import { StatusMark } from "../components/Status.tsx";
 import { ITEM_KIND, MEETING_STATUS as MEETING_MARK } from "../status.ts";
 import type { MeetingDetail as Detail, MeetingItem, MeetingsState } from "../../meetings/types.ts";
 import { deliveryApi } from "../delivery-api.ts";
 import { ITEM_KIND_LABELS, MEETING_STATUS_LABELS } from "../meetings-model.ts";
 import { routeLink } from "../navigation.ts";
-import { DetailHeader, EmptyState } from "../components/WorkspacePrimitives.tsx";
+import { DetailHeader, EmptyState, PanelHead } from "../components/WorkspacePrimitives.tsx";
 import { MeetingItemRow, type ItemAction } from "../components/MeetingItemRow.tsx";
 import { MeetingDisclosure } from "../components/MeetingDisclosure.tsx";
 
@@ -102,25 +102,27 @@ export function MeetingDetail({ recordingId, back, state, onChanged, paused }: {
     </Group>
     {canAnalyze && !openAI && <Text size="sm">To analyze meetings, connect or restore OpenAI in <a href={routeLink("connections")}>Connections</a>.</Text>}
 
-    <section aria-labelledby="meeting-project-title" className="form-stage"><Stack gap="xs">
-      <Title order={2} className="meeting-group-title" id="meeting-project-title">Project</Title>
-      <NativeSelect label="This meeting is about" value={project} onChange={e => setProject(e.currentTarget.value)} disabled={busy}
+    <section aria-labelledby="meeting-project-title" className="app-panel">
+      <PanelHead id="meeting-project-title" title="Project" spec={{ tone: detail.projectId ? "blue" : "gray", icon: Folder, label: "" }} />
+      <Stack gap="xs" className="panel-body is-form"><NativeSelect label="This meeting is about" value={project} onChange={e => setProject(e.currentTarget.value)} disabled={busy}
         data={[{ value: "", label: "No project" }, ...(choices?.projects ?? []).map(p => ({ value: p.id, label: p.name }))]} />
       {externalDomains.length > 0 && <Checkbox label={`Use this project for future meetings with ${externalDomains.map(d => `@${d}`).join(", ")}`} checked={remember} disabled={busy || !project} onChange={e => setRemember(e.currentTarget.checked)} />}
       <Group><Button variant="default" disabled={busy || (project === (detail.projectId ?? "") && !remember)} onClick={saveProject}>Save project</Button></Group>
     </Stack></section>
 
-    {detail.summary && <section aria-labelledby="meeting-summary-title"><Stack gap="xs">
-      <Title order={2} className="meeting-group-title" id="meeting-summary-title">{detail.summary.headline}</Title>
-      {detail.summary.overview && <Text className="meeting-prose">{detail.summary.overview}</Text>}
-      {detail.summary.direction.length > 0 && <><Text fw={600} size="sm">Direction</Text><List size="sm" spacing={4}>{detail.summary.direction.map(d => <List.Item key={d}>{d}</List.Item>)}</List></>}
-    </Stack></section>}
+    {detail.summary && <section aria-labelledby="meeting-summary-title" className="app-panel">
+      <PanelHead id="meeting-summary-title" title={detail.summary.headline} spec={{ tone: "gray", icon: FileText, label: "" }} />
+      <Stack gap="xs" className="panel-body">
+        {detail.summary.overview && <Text className="meeting-prose">{detail.summary.overview}</Text>}
+        {detail.summary.direction.length > 0 && <><Text fw={600} size="sm">Direction</Text><List size="sm" spacing={4}>{detail.summary.direction.map(d => <List.Item key={d}>{d}</List.Item>)}</List></>}
+      </Stack>
+    </section>}
 
-    {byKind.map(group => <section key={group.kind} aria-labelledby={`kind-${group.kind}`} className="meeting-group">
-      <Title order={2} className="meeting-group-title" id={`kind-${group.kind}`}><StatusIcon spec={ITEM_KIND[group.kind]} />{ITEM_KIND_LABELS[group.kind]}{group.items.length > 1 ? "s" : ""} <CountPill value={group.items.length} decorative={false} /></Title>
+    {byKind.map(group => <section key={group.kind} aria-labelledby={`kind-${group.kind}`} className="meeting-group app-panel">
+      <PanelHead id={`kind-${group.kind}`} title={`${ITEM_KIND_LABELS[group.kind]}${group.items.length > 1 ? "s" : ""}`} spec={ITEM_KIND[group.kind]} count={group.items.length} />
       <ul className="meeting-list">{group.items.map(item => <MeetingItemRow key={item.id} item={item} busy={busy} onAction={onAction} returnTo={here} showMeeting={false} showKind={false} showProject={item.projectId !== detail.projectId} />)}</ul>
     </section>)}
-    {detail.status === "analyzed" && byKind.length === 0 && <EmptyState title="Nothing to track from this meeting">No promises, client asks or decisions about project work were found.</EmptyState>}
+    {detail.status === "analyzed" && byKind.length === 0 && <div className="app-panel"><EmptyState title="Nothing to track from this meeting">No promises, client asks or decisions about project work were found.</EmptyState></div>}
 
     <Modal opened={reviewing && !!state} onClose={() => { setReviewing(false); setAgreed(false); }} title="Analyze this meeting?" centered size="lg">
       {state && <Stack>

@@ -2,7 +2,8 @@ import type { MeetingItem } from "../meetings/types.ts";
 import type {
   Confidence, EvidenceState, IntelItem, ItemKind, ItemStatus, Owner, ProposalKind, Provenance, ReadinessLevel, SourceHealth,
 } from "./types.ts";
-import { hash, itemId, normaliseKey, significantTokens, type IntelStore } from "./store.ts";
+import { hash, itemId, type IntelStore } from "./store.ts";
+import { titleMatches } from "./scope.ts";
 import { draftOutcome } from "./outcome.ts";
 
 /** Everything the reconciler reads for one project. Gathered by the caller so tests need no live sources. */
@@ -143,6 +144,7 @@ export function reconcileProject(store: IntelStore, input: ReconcileInput, now: 
         readinessTarget: f.kind === "milestone" ? "usable_by_client" : null, readinessReached: null, owner: f.owner, dueDate: f.dueDate,
         acceptance: f.acceptance, dependsOn: ms ? ms.dependencies.map((d) => planIds.get(d)).filter((x): x is string => !!x) : [],
         locked: false, provenance: [f.prov], lastSupportedAt: f.prov.observedAt === "1970-01-01T00:00:00.000Z" ? at : f.prov.observedAt, createdAt: at, updatedAt: at,
+        lane: null, goal: null, verifiedAt: null, sentAt: null, reopenCount: 0,
       };
       store.insertItem(item, f.title);
       report.itemsAdded++;
@@ -219,13 +221,7 @@ export function reconcileProject(store: IntelStore, input: ReconcileInput, now: 
       for (const item of store.items(input.projectId)) {
         if ((item.kind !== "requirement" && item.kind !== "milestone") || item.status === "dropped" || item.status === "obsolete") continue;
         if (!["not_implemented", "unknown", "unverified"].includes(item.evidenceState)) continue;
-        const tokens = significantTokens(item.title);
-        if (!tokens.length) continue;
-        const need = tokens.length === 1 ? 1 : Math.max(2, Math.ceil(tokens.length * 0.6));
-        const hit = evidence.find((e) => {
-          const set = new Set(normaliseKey(e.text).split(" "));
-          return tokens.filter((t) => set.has(t)).length >= need;
-        });
+        const hit = evidence.find((e) => titleMatches(item.title, e.text));
         if (!hit) continue;
         const prov: Provenance = { sourceKind: hit.kind, sourceId: hit.id, label: hit.label, quote: null, observedAt: hit.at, confidence: "medium", link: null };
         if (item.locked) {

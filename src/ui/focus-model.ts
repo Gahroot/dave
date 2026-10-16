@@ -1,7 +1,7 @@
 import type {
-  Blocker, DeliveryStage, Freshness, IntelItem, ItemKind, ItemStatus, Objective, Proposal, ProjectFocusRow, ReadinessLevel, SourceHealth,
+  Blocker, DeliveryProgress, DeliveryStage, DeliveryStep, Freshness, IntelItem, ItemKind, ItemStatus, Move, Objective, Proposal, ProjectFocusRow, ReadinessLevel, SourceHealth,
 } from "../intel/types.ts";
-import { READINESS_LEVELS } from "../intel/types.ts";
+import { DELIVERY_STEPS, READINESS_LEVELS, VISIBLE_MOVES } from "../intel/types.ts";
 
 /** Pure labels, grouping and sorting for the Focus home. No React, no clock: callers pass `now`. */
 
@@ -176,4 +176,90 @@ export function isFirstRun(state: { top: unknown; projects: readonly ProjectFocu
 /** Unknown dates sort last; confirmed edit helpers keep acceptance lists tidy. */
 export function parseLines(text: string, max = 20): string[] {
   return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(0, max);
+}
+
+/** What reaching each delivery step asks of you, phrased as the next thing to do. */
+export const STEP_GOAL: Readonly<Record<DeliveryStep, string>> = {
+  production_ready: "Verify the finish line",
+  live: "Go live",
+  using: "Get the client using it",
+  signed_off: "Get sign-off",
+};
+
+/** Home order: confirmed projects in delivery, most behind first. Unconfirmed and delivered projects sit in their own groups. */
+export function homeGroups(rows: readonly ProjectFocusRow[]): { ranked: ProjectFocusRow[]; setup: ProjectFocusRow[]; delivered: ProjectFocusRow[] } {
+  const byName = (a: ProjectFocusRow, b: ProjectFocusRow) => a.projectName.localeCompare(b.projectName) || a.projectId.localeCompare(b.projectId);
+  const ranked = rows.filter(r => r.delivery.confirmed && !r.delivery.delivered).sort((a, b) =>
+    (b.delivery.behind?.score ?? 0) - (a.delivery.behind?.score ?? 0) ||
+    a.delivery.percentDone - b.delivery.percentDone || byName(a, b));
+  return {
+    ranked,
+    setup: rows.filter(r => !r.delivery.confirmed).sort(byName),
+    delivered: rows.filter(r => r.delivery.confirmed && r.delivery.delivered).sort(byName),
+  };
+}
+
+/** "Step 2 of 4: Go live". */
+export function stepLabel(p: DeliveryProgress): string {
+  if (!p.confirmed) return "Finish line not confirmed";
+  if (p.delivered || !p.currentStep) return "Delivered: signed off";
+  return `Step ${p.stepNumber} of ${DELIVERY_STEPS.length}: ${STEP_GOAL[p.currentStep]}`;
+}
+
+/** Each step on its own; reaching a later step never claims an earlier one. */
+export function stepCells(p: DeliveryProgress): { step: DeliveryStep; reached: boolean; current: boolean }[] {
+  return DELIVERY_STEPS.map(step => ({ step, reached: p.steps[step], current: p.currentStep === step }));
+}
+
+const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
+
+/** The score's parts, so the number is never shown alone. */
+export function behindLine(p: DeliveryProgress): string {
+  const b = p.behind;
+  if (!b) return "Not scored until the finish line is confirmed";
+  const schedule = b.schedule === null ? "No target date" : `Behind schedule ${b.schedule}`;
+  return `${schedule} · Distance ${b.distance} · Stalled ${b.stalled} (${days(b.stalledDays)})`;
+}
+
+/** "5 of 9 verified · 49% done". */
+export function progressLine(p: DeliveryProgress): string {
+  const verified = p.finishLineItems === 0 ? "No finish-line items yet" : `${p.verifiedItems} of ${p.finishLineItems} verified`;
+  return `${verified} · ${p.percentDone}% done`;
+}
+
+/** Score floors for the colour bands. The colour only repeats the number, which is always shown with its parts. */
+export const BEHIND_BAND_FLOORS = { far: 70, behind: 40 } as const;
+
+/** Colour and word for a behind score: red far behind, amber behind, blue on pace. */
+export function behindBand(score: number): { tone: "red" | "amber" | "blue"; label: string } {
+  if (score >= BEHIND_BAND_FLOORS.far) return { tone: "red", label: "Far behind" };
+  if (score >= BEHIND_BAND_FLOORS.behind) return { tone: "amber", label: "Behind" };
+  return { tone: "blue", label: "On pace" };
+}
+
+/** Decisions grouped by project in their existing order, so each project name is read once. */
+export function groupDecisions<T extends Pick<Proposal, "projectId" | "projectName">>(decisions: readonly T[]): { projectId: string; projectName: string; decisions: T[] }[] {
+  const groups = new Map<string, { projectId: string; projectName: string; decisions: T[] }>();
+  for (const d of decisions) {
+    const group = groups.get(d.projectId) ?? { projectId: d.projectId, projectName: d.projectName, decisions: [] };
+    group.decisions.push(d);
+    groups.set(d.projectId, group);
+  }
+  return [...groups.values()];
+}
+
+/** Today at a glance. Real counts only, each one repeated further down the page. */
+export function homePulse(state: { projects: readonly ProjectFocusRow[]; decisions: readonly unknown[] }): { inDelivery: number; overdue: number; decisions: number; waitingOnClient: number } {
+  const { ranked } = homeGroups(state.projects);
+  return {
+    inDelivery: ranked.length,
+    overdue: ranked.filter(r => r.delivery.overdue).length,
+    decisions: state.decisions.length,
+    waitingOnClient: ranked.filter(r => r.delivery.waitingOnClient).length,
+  };
+}
+
+/** At most VISIBLE_MOVES moves up front; the rest go behind a disclosure. */
+export function visibleMoves<T extends Move>(moves: readonly T[]): { shown: T[]; more: T[] } {
+  return { shown: moves.slice(0, VISIBLE_MOVES), more: moves.slice(VISIBLE_MOVES) };
 }

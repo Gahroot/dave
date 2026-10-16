@@ -4,7 +4,7 @@ import { ArrowRight, ChevronLeft, ChevronRight, History, RefreshCw } from "lucid
 import type { AttentionAction, InboxItem, Portfolio } from "../../shared/types.ts";
 import { InboxView } from "./InboxView.tsx";
 import { LazyDeliveryView as DeliveryView } from "./LazyDeliveryView.tsx";
-import { PageHeader, DetailHeader, EmptyState } from "../components/WorkspacePrimitives.tsx";
+import { PageHeader, DetailHeader, EmptyState, PanelHead } from "../components/WorkspacePrimitives.tsx";
 import { CountPill, HelpTip, StatusIcon, StatusMark } from "../components/Status.tsx";
 import { parseRoute, routeLink } from "../navigation.ts";
 import { normalizeInbox, inboxSourceStatus, inboxCounts, groupInbox, inboxDisplayOrder, type InboxRow } from "../inbox-model.ts";
@@ -101,7 +101,7 @@ export function TodayView({ portfolio, busyId, onResolve, onSeen, actions, pause
   if (selected) return <Stack gap="md" className="focused-workspace inbox-workspace">
     <DetailHeader title={selectedRequest?.title ?? selectedProject?.name ?? "Selected work"} back={routeLink("queue", { filter: navigation.filter, page: page ? String(page + 1) : null })} backLabel="Back to inbox" />
     {feedback}
-    <section aria-label="Selected work">
+    <section aria-label="Selected work" className="app-panel panel-body">
       {navigation.item && (selectedRequest ? <InboxView items={[selectedRequest]} compact busyId={busyId} onResolve={(id, action) => void resolve(id, action)} actions={actions} /> : <EmptyState title="This request is no longer in the queue">Check History for saved decisions.</EmptyState>)}
       {navigation.delivery && (selectedProject ? <DeliveryView key={selectedProject.id} project={selectedProject} today /> : <Alert color="red" title="That project is unavailable">It is hidden or no longer discovered. Open <a href="#projects?hidden=1">hidden projects</a> to recover it.</Alert>)}
       {navigation.invalidSelection && <EmptyState title="This item is unavailable">Return to the inbox to choose current work.</EmptyState>}
@@ -134,8 +134,8 @@ export function TodayView({ portfolio, busyId, onResolve, onSeen, actions, pause
         <div className="workspace-list" aria-label="Attention list">
           {sections.map(section => {
             const spec = INBOX_CATEGORY[section.category];
-            return <section key={section.category} className="inbox-section" aria-labelledby={`inbox-section-${section.category}`} data-tone={spec.tone}>
-              <h2 className="inbox-section-head" id={`inbox-section-${section.category}`}><StatusIcon spec={spec} /><span>{spec.label}</span><CountPill value={counts[section.category]} tone={spec.tone} decorative={false} /></h2>
+            return <section key={section.category} className="inbox-section app-panel" aria-labelledby={`inbox-section-${section.category}`} data-tone={spec.tone}>
+              <PanelHead id={`inbox-section-${section.category}`} title={spec.label} spec={spec} count={counts[section.category]} countTone={spec.tone} />
               {section.clusters.map(cluster => {
                 const lead = cluster.rows[0]!;
                 if (cluster.rows.length === 1) return renderRow(lead, null);
@@ -149,7 +149,7 @@ export function TodayView({ portfolio, busyId, onResolve, onSeen, actions, pause
               })}
             </section>;
           })}
-          {!visible.length && <EmptyState title={page > 0 ? "No items on this page" : rows.length ? "Nothing matches this filter" : "No current attention in loaded evidence"} action={page > 0 ? <Button variant="subtle" color="dark" onClick={() => setPage(0)}>First page</Button> : undefined}>Unchecked or unavailable projects may still need you.</EmptyState>}
+          {!visible.length && <div className="app-panel"><EmptyState title={page > 0 ? "No items on this page" : rows.length ? "Nothing matches this filter" : "No current attention in loaded evidence"} action={page > 0 ? <Button variant="subtle" color="dark" onClick={() => setPage(0)}>First page</Button> : undefined}>Unchecked or unavailable projects may still need you.</EmptyState></div>}
           {(filtered.length > PAGE_SIZE || page > 0) && <Group p="sm" gap="xs"><Text size="sm" mr="sm">Page {page + 1} of {Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))}</Text><Button variant="subtle" color="dark" leftSection={<ChevronLeft size={16} aria-hidden="true" />} disabled={!page} onClick={() => setPage(p => p - 1)}>Previous</Button><Button variant="subtle" color="dark" rightSection={<ChevronRight size={16} aria-hidden="true" />} disabled={(page + 1) * PAGE_SIZE >= filtered.length} onClick={() => setPage(p => p + 1)}>Next</Button></Group>}
         </div>
       </div>

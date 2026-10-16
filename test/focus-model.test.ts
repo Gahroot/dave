@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { IntelItem, Objective, Proposal, ProjectFocusRow, Provenance, SourceHealth } from "../src/intel/types.ts";
+import type { DeliveryProgress, IntelItem, Move, Objective, Proposal, ProjectFocusRow, Provenance, SourceHealth } from "../src/intel/types.ts";
 import {
-  agoLabel, briefMode, countLine, dueState, evidenceFreshness, freshnessText, groupItemsByKind, isFirstRun, meetingCommitments,
-  parseLines, proposalOrigin, readinessCells, readinessSummary, safeLink, sortDecisions, sortProjectRows, sourceWarning,
+  agoLabel, behindBand, behindLine, briefMode, countLine, dueState, evidenceFreshness, freshnessText, groupDecisions, groupItemsByKind, homeGroups, homePulse, isFirstRun, meetingCommitments,
+  parseLines, progressLine, proposalOrigin, readinessCells, readinessSummary, safeLink, sortDecisions, sortProjectRows, sourceWarning, stepCells,
+  stepLabel, visibleMoves,
 } from "../src/ui/focus-model.ts";
 
 const NOW = Date.parse("2026-10-12T12:00:00Z");
@@ -10,12 +11,23 @@ const prov = (over: Partial<Provenance> = {}): Provenance => ({ sourceKind: "mee
 const item = (over: Partial<IntelItem>): IntelItem => ({
   id: "i", projectId: "p", kind: "requirement", title: "T", detail: null, basis: "inferred", status: "open", evidenceState: "unknown",
   readinessTarget: null, readinessReached: null, owner: "me", dueDate: null, acceptance: [], dependsOn: [], locked: false, provenance: [],
-  lastSupportedAt: "2026-10-10T00:00:00Z", createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z", ...over,
+  lastSupportedAt: "2026-10-10T00:00:00Z", createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z",
+  lane: null, goal: null, verifiedAt: null, sentAt: null, reopenCount: 0, ...over,
+});
+const progress = (over: Partial<DeliveryProgress> = {}): DeliveryProgress => ({
+  confirmed: true, delivered: false, percentDone: 0, finishLineItems: 0, verifiedItems: 0,
+  steps: { production_ready: false, live: false, using: false, signed_off: false }, currentStep: "production_ready", stepNumber: 1,
+  startDate: "2026-10-01", targetDate: null, suggestedTargetDate: null, lastRealProgressAt: null, lastClientSeenAt: null, unseenByClient: 0,
+  waitingOnClient: false, overdue: false,
+  behind: { score: 0, schedule: null, distance: 100, stalled: 0, stalledDays: 0, weights: { schedule: 0, distance: 0.6, stalled: 0.4 } }, ...over,
+});
+const scored = (score: number, percentDone = 0): Partial<DeliveryProgress> => ({
+  percentDone, behind: { score, schedule: null, distance: 100 - percentDone, stalled: 0, stalledDays: 0, weights: { schedule: 0, distance: 0.6, stalled: 0.4 } },
 });
 const row = (over: Partial<ProjectFocusRow>): ProjectFocusRow => ({
   projectId: "p", projectName: "P", stage: "building", outcome: null, outcomeBasis: null, objective: null, readinessReached: null,
   counts: { requirements: 0, milestonesDone: 0, milestonesTotal: 0, openBlockers: 0, pendingProposals: 0 }, nextCommitment: null,
-  freshness: "fresh", lastReconciledAt: null, ...over,
+  freshness: "fresh", lastReconciledAt: null, delivery: progress(), nextMove: null, ...over,
 });
 const proposal = (over: Partial<Proposal>): Proposal => ({
   id: "x", projectId: "p", projectName: "P", kind: "scope_change", material: false, summary: "s", detail: null, itemId: null, patch: {},
@@ -100,6 +112,65 @@ describe("focus model", () => {
     expect(countLine({ requirements: 1, milestonesDone: 2, milestonesTotal: 5, openBlockers: 0, pendingProposals: 3 })).toBe("1 requirement · 2 of 5 milestones done · 3 awaiting you");
     expect(isFirstRun({ top: null, projects: [row({})], lastReconciledAt: null })).toBe(true);
     expect(isFirstRun({ top: null, projects: [row({})], lastReconciledAt: "2026-10-01T00:00:00Z" })).toBe(false);
+  });
+  it("groups the home: confirmed projects most behind first, then by least done and name; setup and delivered apart", () => {
+    const rows = [
+      row({ projectId: "z", projectName: "Zeta", delivery: progress(scored(40, 50)) }),
+      row({ projectId: "a", projectName: "Acme", delivery: progress(scored(52, 40)) }),
+      row({ projectId: "b", projectName: "Beta", delivery: progress(scored(40, 20)) }),
+      row({ projectId: "g", projectName: "Gamma", delivery: progress(scored(40, 50)) }),
+      row({ projectId: "u", projectName: "Unset", delivery: progress({ confirmed: false, behind: null }) }),
+      row({ projectId: "d", projectName: "Done", delivery: progress({ delivered: true, currentStep: null, stepNumber: 5 }) }),
+    ];
+    const g = homeGroups(rows);
+    expect(g.ranked.map(r => r.projectId)).toEqual(["a", "b", "g", "z"]);
+    expect(g.setup.map(r => r.projectId)).toEqual(["u"]);
+    expect(g.delivered.map(r => r.projectId)).toEqual(["d"]);
+    expect(homeGroups([...rows].reverse())).toEqual(g);
+  });
+  it("labels the step, the score's parts and progress in words", () => {
+    expect(stepLabel(progress({ currentStep: "live", stepNumber: 2 }))).toBe("Step 2 of 4: Go live");
+    expect(stepLabel(progress({ confirmed: false }))).toBe("Finish line not confirmed");
+    expect(stepLabel(progress({ delivered: true, currentStep: null, stepNumber: 5 }))).toBe("Delivered: signed off");
+    expect(stepCells(progress({ steps: { production_ready: false, live: true, using: false, signed_off: false } })).map(c => [c.step, c.reached, c.current]))
+      .toEqual([["production_ready", false, true], ["live", true, false], ["using", false, false], ["signed_off", false, false]]);
+    expect(behindLine(progress({ behind: { score: 52, schedule: 60, distance: 60, stalled: 21, stalledDays: 3, weights: { schedule: 0.5, distance: 0.3, stalled: 0.2 } } })))
+      .toBe("Behind schedule 60 · Distance 60 · Stalled 21 (3 days)");
+    expect(behindLine(progress({ behind: { score: 46, schedule: null, distance: 30, stalled: 7, stalledDays: 1, weights: { schedule: 0, distance: 0.6, stalled: 0.4 } } })))
+      .toBe("No target date · Distance 30 · Stalled 7 (1 day)");
+    expect(behindLine(progress({ confirmed: false, behind: null }))).toMatch(/not scored/i);
+    expect(progressLine(progress({ finishLineItems: 9, verifiedItems: 5, percentDone: 49 }))).toBe("5 of 9 verified · 49% done");
+    expect(progressLine(progress())).toBe("No finish-line items yet · 0% done");
+  });
+  it("shows at most three moves and keeps the rest", () => {
+    const m = (id: string): Move => ({ id, kind: "verify", title: id, why: "", itemId: null, proposalId: null, proposalKind: null, step: null, suggestedDate: null, doneWhen: [] });
+    const out = visibleMoves([m("1"), m("2"), m("3"), m("4"), m("5")]);
+    expect(out.shown.map(x => x.id)).toEqual(["1", "2", "3"]);
+    expect(out.more.map(x => x.id)).toEqual(["4", "5"]);
+    expect(visibleMoves([m("1")])).toEqual({ shown: [m("1")], more: [] });
+  });
+  it("bands the behind score at 70 and 40, and never colours without the number", () => {
+    expect(behindBand(100)).toEqual({ tone: "red", label: "Far behind" });
+    expect(behindBand(70)).toEqual({ tone: "red", label: "Far behind" });
+    expect(behindBand(69)).toEqual({ tone: "amber", label: "Behind" });
+    expect(behindBand(40)).toEqual({ tone: "amber", label: "Behind" });
+    expect(behindBand(39)).toEqual({ tone: "blue", label: "On pace" });
+    expect(behindBand(0)).toEqual({ tone: "blue", label: "On pace" });
+  });
+  it("groups decisions by project in their given order and counts today from real rows", () => {
+    const d = (id: string, projectId: string) => ({ id, projectId, projectName: projectId.toUpperCase() });
+    expect(groupDecisions([d("1", "b"), d("2", "a"), d("3", "b")])).toEqual([
+      { projectId: "b", projectName: "B", decisions: [d("1", "b"), d("3", "b")] },
+      { projectId: "a", projectName: "A", decisions: [d("2", "a")] },
+    ]);
+    expect(groupDecisions([])).toEqual([]);
+    const projects = [
+      row({ projectId: "a", delivery: progress({ overdue: true, waitingOnClient: true }) }),
+      row({ projectId: "b", delivery: progress({ waitingOnClient: true }) }),
+      row({ projectId: "c", delivery: progress({ confirmed: false, behind: null, overdue: true, waitingOnClient: true }) }),
+      row({ projectId: "d", delivery: progress({ delivered: true, overdue: true }) }),
+    ];
+    expect(homePulse({ projects, decisions: [1, 2, 3] })).toEqual({ inDelivery: 2, overdue: 1, decisions: 3, waitingOnClient: 2 });
   });
   it("parses multi-line lists", () => {
     expect(parseLines(" a \r\n\n b\n")).toEqual(["a", "b"]);

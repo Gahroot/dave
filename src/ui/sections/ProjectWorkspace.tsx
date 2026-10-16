@@ -34,11 +34,13 @@ export function ProjectWorkspace({ project, items, route, busy, onOverride, onCo
       <Tabs.List aria-label="Project workspace"><Tabs.Tab value="delivery">Work</Tabs.Tab><Tabs.Tab value="overview">Reference</Tabs.Tab></Tabs.List>
       <Tabs.Panel value="overview" pt="md"><Stack gap="md">
         <div className="status-line"><StatusMark spec={FRESHNESS[project.scanStatus ?? "cached"]} /><StatusMark spec={{ tone: "gray", icon: Clock, label: "" }}><span title={new Date(project.summary.generatedAt).toLocaleString()}>Summary {relative(project.summary.generatedAt)}</span></StatusMark></div>
-        <ProjectCard project={project} busy={busy} onOverride={onOverride} onCorrect={onCorrect} section="overview" />
-        <CopyText text={projectWorkBrief(project)} label="Copy project notes (context only)" />
-        <details className="quiet-details" open={sourcesOpen} onToggle={event => setSourcesOpen(event.currentTarget.open)}><summary>Sources and context</summary><Stack gap="md"><ProjectCard project={project} busy={busy} onOverride={onOverride} onCorrect={onCorrect} section="context" />{items.filter(item => item.projectId === project.id).slice(0, 3).map(item => <Stack key={item.id} gap={4}><Text size="sm">{item.detail}</Text><CopyText text={handoff(project, item)} label="Copy handoff" /></Stack>)}</Stack></details>
+        <div className="app-panel panel-body"><Stack gap="md">
+          <ProjectCard project={project} busy={busy} onOverride={onOverride} onCorrect={onCorrect} section="overview" />
+          <CopyText text={projectWorkBrief(project)} label="Copy project notes (context only)" />
+        </Stack></div>
+        <details className="app-panel panel-disclosure" open={sourcesOpen} onToggle={event => setSourcesOpen(event.currentTarget.open)}><summary>Sources and context</summary><Stack gap="md" className="panel-disclosure-body"><ProjectCard project={project} busy={busy} onOverride={onOverride} onCorrect={onCorrect} section="context" />{items.filter(item => item.projectId === project.id).slice(0, 3).map(item => <Stack key={item.id} gap={4}><Text size="sm">{item.detail}</Text><CopyText text={handoff(project, item)} label="Copy handoff" /></Stack>)}</Stack></details>
       </Stack></Tabs.Panel>
-      <Tabs.Panel value="delivery" pt="md">{deliveryVisited && <Stack gap="xl"><DeliveryView project={project} /><Suspense fallback={null}><ProjectMeetings projectId={project.id} returnTo={link("delivery")} /></Suspense></Stack>}</Tabs.Panel>
+      <Tabs.Panel value="delivery" pt="md">{deliveryVisited && <Stack gap="md"><div className="app-panel panel-body"><DeliveryView project={project} /></div><Suspense fallback={null}><ProjectMeetings projectId={project.id} returnTo={link("delivery")} /></Suspense></Stack>}</Tabs.Panel>
 
     </Tabs>
   </Stack></section>;

@@ -6,7 +6,7 @@ import { deliveryApi } from "../delivery-api.ts";
 import { relative } from "../format.ts";
 import { connectionSummary, runSummary } from "../meetings-model.ts";
 import { Check, KeyRound, Pause, Play, RefreshCw, Sparkles, Unplug } from "lucide-react";
-import { StatusIcon } from "../components/Status.tsx";
+import { StatusIcon, StatusTile } from "../components/Status.tsx";
 import { CONNECTION } from "../status.ts";
 
 const errorText = (e: unknown, fallback: string) => e instanceof Error ? e.message : fallback;
@@ -67,7 +67,7 @@ export function FathomConnection() {
   const analysis = state?.analysis;
   const mark = !state ? CONNECTION.pending : state.key.storageError || state.key.state === "invalid" ? CONNECTION["invalid-key"] : !state.key.saved || !state.settings.connectedAt ? CONNECTION.disconnected : state.sync.lastError ? { ...CONNECTION.error, label: "Connected, last check failed" } : state.settings.paused ? CONNECTION.paused : CONNECTION.connected;
   return <Card withBorder radius="md" padding="md" className="connection-card" data-tone={mark.tone}><Stack gap="sm">
-    <Title order={3} className="connection-title"><StatusIcon spec={mark} size={18} />Fathom meetings</Title>
+    <Title order={3} className="connection-title"><StatusTile spec={mark} size={18} />Fathom meetings</Title>
     <Text role="status" fw={600}>{state ? connectionSummary(state) : "Loading status…"}{state?.sync.lastSuccessAt ? ` Last checked ${relative(state.sync.lastSuccessAt)}.` : ""}</Text>
     {state?.sync.lastError && <Text size="sm" className="status-line"><StatusIcon spec={CONNECTION.error} />Last problem: {state.sync.lastError}.{state.sync.backoffUntil && Date.parse(state.sync.backoffUntil) > Date.now() ? ` DAVE tries again automatically after ${new Date(state.sync.backoffUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.` : ""}</Text>}
     {lastRun && <Text size="sm" c="dimmed">Last check {relative(lastRun.finishedAt)}: {runSummary(lastRun)}</Text>}

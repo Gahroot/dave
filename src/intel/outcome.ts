@@ -24,6 +24,19 @@ export function deriveReadiness(items: IntelItem[]): Record<ReadinessLevel, Evid
   return out;
 }
 
+/**
+ * Readiness from the items, upgraded by the project-level step marks a person recorded (live, client using it,
+ * signed off). A mark is a person's statement, so that level counts as verified; nothing is ever downgraded.
+ */
+export function readinessWithSteps(items: IntelItem[], outcome: Pick<StoredOutcome, "liveAt" | "usingAt" | "signedOffAt"> | null): Record<ReadinessLevel, EvidenceState> {
+  const out = deriveReadiness(items);
+  if (!outcome) return out;
+  if (outcome.liveAt) out.deployed = "verified";
+  if (outcome.usingAt) out.usable_by_client = "verified";
+  if (outcome.signedOffAt) out.client_accepted = "verified";
+  return out;
+}
+
 export function deriveStage(items: IntelItem[], readiness: Record<ReadinessLevel, EvidenceState>, hasActivity: boolean): DeliveryStage {
   const tracked = items.filter(trackable);
   if (readiness.client_accepted === "verified") return "accepted";
@@ -41,7 +54,7 @@ export function deriveStage(items: IntelItem[], readiness: Record<ReadinessLevel
 export function projectOutcome(store: IntelStore, projectId: string, items: IntelItem[], hasActivity: boolean): ProjectOutcome | null {
   const o = store.outcome(projectId);
   if (!o) return null;
-  const readiness = deriveReadiness(items);
+  const readiness = readinessWithSteps(items, o);
   const rec = store.reconciled(projectId);
   return {
     projectId, desiredOutcome: o.desiredOutcome, acceptanceCriteria: o.acceptanceCriteria,

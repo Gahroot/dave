@@ -1,6 +1,22 @@
 import type { ReactNode } from "react";
 import { Button, Group, Stack, Text, Title } from "@mantine/core";
 import { ChevronLeft, Inbox } from "lucide-react";
+import type { StatusSpec, Tone } from "../status.ts";
+import { CountPill, StatusTile } from "./Status.tsx";
+
+/** The heading strip of a panel: tone tile, title, count, an optional note and actions on the right. */
+export function PanelHead({ id, title, spec, count, countTone, note, help, actions }: {
+  id: string; title: string; spec: StatusSpec; count?: number; countTone?: Tone; note?: ReactNode; help?: ReactNode; actions?: ReactNode;
+}) {
+  return <div className="panel-head">
+    <StatusTile spec={spec} />
+    <div className="panel-head-text">
+      <div className="panel-head-title"><Title order={2} id={id}>{title}</Title>{count !== undefined && <CountPill value={count} tone={countTone} decorative={false} />}{help}</div>
+      {note && <Text size="sm" c="dimmed" className="panel-head-note">{note}</Text>}
+    </div>
+    {actions && <div className="panel-head-actions">{actions}</div>}
+  </div>;
+}
 
 export function PageHeader({ title, actions, children }: { title: string; actions?: ReactNode; children?: ReactNode }) {
   return <header className="page-header"><Group justify="space-between" align="flex-start"><Title order={1}>{title}</Title>{actions}</Group>{children}</header>;

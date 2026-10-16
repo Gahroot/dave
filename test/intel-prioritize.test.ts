@@ -71,4 +71,17 @@ describe("prioritiser scenarios", () => {
     expect(h.intel.brief(o.id)).toBe(o.brief);
     for (const f of fs.readdirSync("src/intel")) expect(fs.readFileSync(`src/intel/${f}`, "utf8")).not.toMatch(/agents\//);
   });
+
+  it("bells and whistles never become a build objective unless you move them to the finish line", () => {
+    h = intelHarness();
+    h.intel.addItem("p1", { kind: "requirement", title: "Dark mode for the dashboard" });
+    const info = h.intel.addItem("p1", { kind: "requirement", title: "Booking calendar view" });
+    const polish = info.items.find((i) => i.title === "Dark mode for the dashboard");
+    const builds = (pi: typeof info) => [pi.objective, ...pi.otherActions].filter((o) => o?.category === "coding").map((o) => o?.objective);
+    expect(builds(info)).toEqual(["Deliver requirement: Booking calendar view"]);
+    expect(info.plan.extras.map((t) => t.itemId)).toEqual([polish?.id]);
+    const moved = h.intel.patchItem(polish?.id ?? "", { lane: "finish_line" });
+    expect(builds(moved)).toContain("Deliver requirement: Dark mode for the dashboard");
+    expect(moved.plan.extras).toEqual([]);
+  });
 });

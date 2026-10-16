@@ -3,13 +3,14 @@ import {
   Clock, ClockAlert, CloudOff, Eye, Flag, Gavel, Hand, Handshake, KeyRound, Lightbulb, ListChecks, LoaderCircle,
   MessageCircleQuestion, MessageSquareWarning, PackageCheck, Plug, Send, TriangleAlert, Unplug, UserCheck, type LucideIcon,
   Code, FilePlus, FlaskConical, GraduationCap, Repeat, Rocket, Search, ShieldCheck, Stamp, UserRound, Wrench,
+  CalendarPlus, Archive, Pause, Presentation, Route, Sparkles, Target,
 } from "lucide-react";
 import type { RunStatus } from "../agents/types.ts";
 import type { InboxKind } from "../shared/types.ts";
 import type { NextStepKind } from "../model/delivery-next-step.ts";
 import type { ItemKind, ItemStatus, MeetingStatus, PromiseStateName } from "../meetings/types.ts";
 import type { PromiseGroup } from "./meetings-model.ts";
-import type { Basis, EvidenceState, Freshness as IntelFreshness, ObjectiveCategory, ProposalKind, ReadinessLevel, SourceHealth } from "../intel/types.ts";
+import type { Basis, DeliveryStep, EvidenceState, Freshness as IntelFreshness, Lane, MoveKind, ObjectiveCategory, ProposalKind, ReadinessLevel, SourceHealth, TaskState } from "../intel/types.ts";
 
 /**
  * The one status language. Tone answers "whose move is it", the icon shape answers
@@ -216,4 +217,38 @@ export const SOURCE_HEALTH: Readonly<Record<SourceHealth["state"], StatusSpec>> 
   degraded: { tone: "amber", icon: Wrench, label: "Degraded" },
   unavailable: { tone: "red", icon: CloudOff, label: "Unavailable" },
   not_connected: { tone: "gray", icon: Unplug, label: "Not connected" },
+};
+
+/** The four delivery steps. Only the last one is green: sign-off is the client's word, not ours. */
+export const DELIVERY_STEP: Readonly<Record<DeliveryStep, StatusSpec>> = {
+  production_ready: { tone: "blue", icon: ShieldCheck, label: "Production-ready" },
+  live: { tone: "blue", icon: Rocket, label: "Live" },
+  using: { tone: "blue", icon: UserRound, label: "Client using it" },
+  signed_off: { tone: "green", icon: UserCheck, label: "Signed off" },
+};
+
+/** Moves are always yours (amber), except chasing someone else, which flags a client blocker (red). */
+export const MOVE_KIND: Readonly<Record<MoveKind, StatusSpec>> = {
+  confirm_finish_line: { tone: "amber", icon: Target, label: "Confirm the finish line" },
+  decide: { tone: "amber", icon: Gavel, label: "Decide" },
+  chase: { tone: "red", icon: Hand, label: "Chase" },
+  verify: { tone: "amber", icon: Eye, label: "Check it" },
+  rethink: { tone: "amber", icon: Route, label: "Rethink" },
+  step: { tone: "amber", icon: Flag, label: "Next step" },
+  demo: { tone: "amber", icon: Presentation, label: "Show the client" },
+  target_date: { tone: "amber", icon: CalendarPlus, label: "Set a target date" },
+};
+
+/** Suggested tasks. Sent is "working, no decision"; paused waits on one of your moves. */
+export const TASK_STATE: Readonly<Record<TaskState, StatusSpec>> = {
+  ready: { tone: "gray", icon: CircleDashed, label: "Ready to send" },
+  sent: { tone: "blue", icon: Send, label: "Sent to EZcoder" },
+  waiting: { tone: "amber", icon: Pause, label: "Paused" },
+};
+
+/** Where a piece of work belongs. DAVE's guess is drawn separately (violet) by the caller. */
+export const LANE: Readonly<Record<Lane, StatusSpec>> = {
+  finish_line: { tone: "blue", icon: Target, label: "Finish line" },
+  extra: { tone: "gray", icon: Sparkles, label: "Extra" },
+  phase2: { tone: "gray", icon: Archive, label: "Phase 2" },
 };

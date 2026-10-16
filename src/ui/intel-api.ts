@@ -1,4 +1,4 @@
-import type { FocusState, ItemKind, Owner, ProjectIntel, DeliveryStage, EvidenceState, ItemStatus, ReadinessLevel } from "../intel/types.ts";
+import type { FocusState, ItemKind, Owner, ProjectIntel, DeliveryStage, EvidenceState, ItemStatus, Lane, MarkableStep, ReadinessLevel } from "../intel/types.ts";
 
 export class IntelRequestError extends Error {
   status: number;
@@ -36,9 +36,12 @@ async function call<T>(method: "GET" | "POST" | "PUT" | "PATCH", url: string, bo
 }
 
 const enc = encodeURIComponent;
-export type OutcomeInput = { desiredOutcome: string; acceptanceCriteria: string[]; stage?: DeliveryStage; lock?: boolean };
+export type OutcomeInput = { desiredOutcome: string; acceptanceCriteria: string[]; stage?: DeliveryStage; lock?: boolean; targetDate?: string | null; startDate?: string | null };
 export type NewItemInput = { kind: ItemKind; title: string; detail?: string; dueDate?: string; owner?: Owner; acceptance?: string[]; dependsOn?: string[] };
-export type ItemPatch = { title?: string; detail?: string; status?: ItemStatus; evidenceState?: EvidenceState; owner?: Owner; dueDate?: string | null; acceptance?: string[]; locked?: boolean; readinessReached?: ReadinessLevel | null; confirm?: boolean };
+export type ItemPatch = { title?: string; detail?: string; status?: ItemStatus; evidenceState?: EvidenceState; owner?: Owner; dueDate?: string | null; acceptance?: string[]; locked?: boolean; readinessReached?: ReadinessLevel | null; confirm?: boolean; lane?: Lane | null; goal?: string | null };
+export type ScheduleInput = { targetDate: string | null; startDate?: string | null };
+export type FinishLineItemInput = { title: string; detail?: string | null; acceptance?: string[]; goal?: string | null };
+export type FinishLineResult = { added: number; skipped: number; intel: ProjectIntel };
 
 export const intelApi = {
   focus: (signal?: AbortSignal) => call<FocusState>("GET", "/api/intel/focus", undefined, signal),
@@ -47,6 +50,14 @@ export const intelApi = {
   putOutcome: (id: string, input: OutcomeInput) => call<ProjectIntel>("PUT", `/api/intel/projects/${enc(id)}/outcome`, input),
   addItem: (id: string, input: NewItemInput) => call<ProjectIntel>("POST", `/api/intel/projects/${enc(id)}/items`, input),
   patchItem: (itemId: string, patch: ItemPatch) => call<ProjectIntel>("PATCH", `/api/intel/items/${enc(itemId)}`, patch),
-  accept: (proposalId: string, note?: string) => call<FocusState>("POST", `/api/intel/proposals/${enc(proposalId)}/accept`, note ? { note } : {}),
+  accept: (proposalId: string, note?: string, lane?: Lane) => call<FocusState>("POST", `/api/intel/proposals/${enc(proposalId)}/accept`, { ...(note ? { note } : {}), ...(lane ? { lane } : {}) }),
   reject: (proposalId: string, note?: string) => call<FocusState>("POST", `/api/intel/proposals/${enc(proposalId)}/reject`, note ? { note } : {}),
+  setSchedule: (id: string, input: ScheduleInput) => call<ProjectIntel>("PUT", `/api/intel/projects/${enc(id)}/schedule`, input),
+  setStep: (id: string, step: MarkableStep, reached: boolean) => call<ProjectIntel>("POST", `/api/intel/projects/${enc(id)}/steps`, { step, reached }),
+  markDemo: (id: string) => call<ProjectIntel>("POST", `/api/intel/projects/${enc(id)}/demo`, {}),
+  markSent: (id: string, itemIds: string[], sent: boolean) => call<ProjectIntel>("POST", `/api/intel/projects/${enc(id)}/tasks/sent`, { itemIds, sent }),
+  addFinishLine: (id: string, items: FinishLineItemInput[], acceptance?: string[]) =>
+    call<FinishLineResult>("POST", `/api/intel/projects/${enc(id)}/finish-line`, acceptance?.length ? { items, acceptance } : { items }),
+  verifyItem: (itemId: string) => call<ProjectIntel>("POST", `/api/intel/items/${enc(itemId)}/verify`, {}),
+  reopenItem: (itemId: string, note?: string) => call<ProjectIntel>("POST", `/api/intel/items/${enc(itemId)}/reopen`, note ? { note } : {}),
 };

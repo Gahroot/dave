@@ -288,6 +288,13 @@ checks every argv and a read spy checks no deny-listed file and nothing in
 
 ## Storage and migration protection
 
+Schema v12 adds delivery-leverage columns additively (item lane, goal, verified and
+sent times, "Not right" count; outcome confirmation, start/target dates, delivery-step
+marks and last demo). Two values are backfilled as approximations because the real
+times were never stored: items already verified get `verified_at = updated_at`, and
+every existing finish line (always written by a person) counts as confirmed at its
+`updated_at`. The automatic `backups/v11-*.db` copy is the way back.
+
 Schema v10 adds the meeting tables additively; a pre-v10 DAVE refuses the upgraded
 store, and the automatic `backups/v9-*.db` copy is the way back. Schema v4 adds
 attention columns without rebuilding v3 tables or changing existing
@@ -336,6 +343,10 @@ project costs its own data and one row in Issues — never the whole dashboard.
 
 ## Next best action and roadmaps
 
+**Focus** is the home: delivery projects most behind first, each with its next move
+(see "Delivery order and task lists" below). The older single-objective view is still
+computed for the change log and `GET /api/intel/focus`, but Focus no longer shows it.
+
 The Inbox opens with one **Do this next** card: the single most valuable action across
 agent runs, delivery steps, inbox items and roadmap gaps, with why it matters and what
 "finished" means. Waiting and paused work never competes. Ranking is in
@@ -346,3 +357,87 @@ milestone/criterion progress and **gaps**: open promises and client asks from Fa
 meetings that no milestone, acceptance line or finish criterion covers (word-overlap
 match in `src/model/roadmap.ts`, no model call). Gaps from meetings newer than the plan
 are marked as new. Nothing is closed automatically.
+
+## Delivery order and task lists
+
+DAVE's job here is to give a solo developer more capacity, not more admin. It only
+suggests and produces text. It never launches EZcoder or an agent and never contacts
+anyone. Logic lives in `src/intel/delivery.ts` and `src/intel/scope.ts`, which are pure:
+the clock is passed in and iteration is sorted, so the same input gives the same output.
+
+**Home order.** Projects with a confirmed finish line are ranked by a "most behind"
+score from 0 to 100, highest first. Every row shows the score's parts:
+
+- *Behind schedule* (50%): how far time used runs ahead of work done, between the start
+  date (or the date the finish line was confirmed) and the target date. 100 once the
+  target date has passed and the work isn't finished.
+- *Distance from delivery* (30%): `100 − % done`.
+- *Stalled* (20%): 7 points per day since real progress, capped at 100.
+
+With no target date the last two parts are weighted 60/40, and "Set a target date"
+becomes a move. One click accepts DAVE's suggestion, which is the latest due date
+among finish-line items and your own commitments. Projects without a confirmed finish
+line sit under **Needs a finish line**. Delivered projects sit under **Delivered**.
+Money and payment terms are not part of the score.
+
+**% done.** Production-ready is worth 70%, split evenly across finish-line items, and an
+item counts only once **you** mark it Verified. *Live*, *Client using it* and *Signed
+off* are 10% each and are marked by you. Only verifying an item or marking a step
+counts as real progress. EZcoder reporting a task done, or a matching commit, only makes
+an item "looks built", which turns into a *Verify* move.
+
+**Moves.** Moves are what only you can do: decide a proposal, chase a client blocker,
+verify built work, rethink a task that came back "Not right" twice, mark the next
+step, show verified work to the client (three or more unseen items, or production-ready
+with any unseen), or set a target date. At most three show at once, and the rest sit
+behind a disclosure. Until the finish line is confirmed, the only move is to confirm it.
+
+**Lanes.** Each item is on the **Finish line**, **Extra** or **Phase 2**. Until you choose,
+DAVE guesses from wording ("polish", "dark mode", "later", "v2" …) and labels the guess.
+Your choice is stored and always wins. New client asks found in meetings are filed with
+one click into any lane, or rejected. Extras and Phase 2 sit in a collapsed **Bells &
+whistles** list with a pitch-ready copy and are never suggested as tasks.
+
+**Suggested tasks.** Open finish-line work becomes an ordered list of standalone
+EZcoder tasks:
+
+```
+So that <what the client gets>
+Why: "<client's words>" (<meeting>) or the agreed finish line
+Build: <item>
+Done when:
+- <acceptance line>
+Context: <project>. Finish line: <…>. Stay within this task; do not deploy, merge or contact the client. Report what you changed and how you checked it.
+```
+
+Order: work already started, then the riskiest part (integrations, auth, payments,
+migrations, deploys), then the earliest due date, then whatever unblocks the most. A
+dependency that is ready comes first. Drafted goals and done-when lines are labelled
+and editable, and changing a goal resets the "Not right" count. A task **pauses** under
+"Paused until you answer" when it is blocked, waits on a client or third-party
+blocker, waits on a pending conflict, deadline or scope decision, has come back "Not
+right" twice, or depends on paused work. The question it waits on becomes one of your moves.
+
+**Copying is sending.** *Copy all* or a single *Copy* records those tasks as sent, and
+*Undo* or *Put back* reverses it. If the clipboard fails, the text stays selectable with
+a *Mark as sent* button. A task that already matches an open EZcoder task by title (at
+least 60% of significant words) shows as sent with "In EZcoder, matched by title".
+*Verified* or *Not right* is one click. *Not right* reopens the item and puts it back on
+the list. The demo move clears on the next linked meeting or with *Shown to the client*.
+
+**Agreements.** Paste an agreement or statement of work under *Edit the finish line*.
+`src/intel/agreement.ts` runs in the browser and pulls out deliverables (under scope,
+deliverable or feature headings) and acceptance lines. It skips out-of-scope, payment
+and legal sections. The pasted text never leaves the browser. Only the lines you tick
+are saved.
+
+Routes (all under the loopback and CSRF guard):
+
+- `PUT /api/intel/projects/:id/schedule`: target and start date. Returns 409 until the finish line is confirmed.
+- `POST /api/intel/projects/:id/steps`: mark *Live*, *Using* or *Signed off*.
+- `POST /api/intel/projects/:id/demo`: shown to the client.
+- `POST /api/intel/projects/:id/tasks/sent`: sent or put back. Every id must belong to the project.
+- `POST /api/intel/projects/:id/finish-line`: add confirmed finish-line items. Duplicates are skipped and counted.
+- `POST /api/intel/items/:itemId/verify` and `/reopen`.
+- `PATCH /api/intel/items/:itemId`: now also accepts `lane` and `goal`.
+- `POST /api/intel/proposals/:id/accept`: now accepts an optional `lane`.

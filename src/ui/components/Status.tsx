@@ -18,6 +18,11 @@ export function StatusMark({ spec, children, size = 16, strong = false }: { spec
   </span>;
 }
 
+/** A status icon on a soft tile of its own tone: the lead of a row or a section heading. The words beside it carry the meaning. */
+export function StatusTile({ spec, size = 16 }: { spec: StatusSpec; size?: number }) {
+  return <span className="status-tile" data-tone={spec.tone}><StatusIcon spec={spec} size={size} /></span>;
+}
+
 /** A small count. Hidden from assistive tech when the surrounding name already states it. */
 export function CountPill({ value, tone, decorative = true }: { value: number; tone?: Tone; decorative?: boolean }) {
   return <span className={`count-pill${tone === "amber" || tone === "red" ? ` is-${tone}` : ""}`} aria-hidden={decorative || undefined}>{value}</span>;

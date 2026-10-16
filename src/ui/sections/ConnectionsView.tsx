@@ -5,7 +5,7 @@ import { deliveryApi } from "../delivery-api.ts";
 import { parseRoute } from "../navigation.ts";
 import { PageHeader } from "../components/WorkspacePrimitives.tsx";
 import { ArrowLeft, ArrowRight, Ban, CircleX, LoaderCircle, Plug, RefreshCw, RotateCcw, Unplug, X } from "lucide-react";
-import { StatusIcon, StatusMark } from "../components/Status.tsx";
+import { StatusIcon, StatusMark, StatusTile } from "../components/Status.tsx";
 import type { StatusSpec } from "../status.ts";
 
 /** OpenAI connection states from the provider service, as marks. */
@@ -55,7 +55,7 @@ export function ConnectionsView() {
     {error && <Alert color="red" title="Connection action needs attention" role="alert">{error}</Alert>}
     {!status && <Text role="status">Connection status not loaded.</Text>}
     <Card withBorder radius="md" padding="md" className="connection-card" data-tone={status ? providerMark(status.openai.state).tone : undefined}><Stack gap="sm">
-      <Title order={3} className="connection-title"><StatusIcon spec={status ? providerMark(status.openai.state) : PROVIDER_STATE.connecting} size={18} />OpenAI</Title>
+      <Title order={3} className="connection-title"><StatusTile spec={status ? providerMark(status.openai.state) : PROVIDER_STATE.connecting} size={18} />OpenAI</Title>
       <Text role="status" fw={600}>Status: {status?.openai.state ?? "loading"}{status?.operation ? ` · Sign-in ${status.operation.status}` : ""}</Text>
       <Text size="sm" c="dimmed">Requested model: gpt-6-astra. Listing does not establish account entitlement.</Text>
       {status && status.openai.state !== "connected" && !pending && <><NativeSelect label="Credential storage for connect or restore" value={storage} onChange={e => setStorage(e.currentTarget.value)} disabled={busy || pending} data={[{ value: "keychain", label: "macOS Keychain: Dave-owned persistent connection" }, { value: "session", label: "Session only: lost when Dave stops" }]} />
@@ -65,7 +65,7 @@ export function ConnectionsView() {
       {pending && <Text size="sm" className="status-line"><StatusIcon spec={PROVIDER_STATE.connecting} />Waiting for your browser sign-in. You can cancel; Dave does not claim connection until sign-in succeeds.</Text>}
     </Stack></Card>
     <Suspense fallback={<Text role="status">Loading Fathom settings…</Text>}><FathomConnection /></Suspense>
-    <Card withBorder radius="md" padding="md" className="connection-card" data-tone="gray"><Stack gap="sm"><Title order={3} className="connection-title"><StatusIcon spec={{ tone: "gray", icon: Ban, label: "" }} size={18} />Anthropic / Claude subscription</Title><Text fw={600}>Status: {status?.claude.state ?? "loading"}</Text><Text size="sm" c="dimmed">Requested models: claude-fable-5-1, claude-opus-5.</Text><Text size="sm">{status?.claude.error ?? "Claude remains unavailable until verified official-runtime isolation is supported."}</Text><Text size="xs" c="dimmed">No Claude login or inference is started here. No Anthropic API-key fallback. Credentials and subscription billing remain owned by the official Claude application.</Text></Stack></Card>
+    <Card withBorder radius="md" padding="md" className="connection-card" data-tone="gray"><Stack gap="sm"><Title order={3} className="connection-title"><StatusTile spec={{ tone: "gray", icon: Ban, label: "" }} size={18} />Anthropic / Claude subscription</Title><Text fw={600}>Status: {status?.claude.state ?? "loading"}</Text><Text size="sm" c="dimmed">Requested models: claude-fable-5-1, claude-opus-5.</Text><Text size="sm">{status?.claude.error ?? "Claude remains unavailable until verified official-runtime isolation is supported."}</Text><Text size="xs" c="dimmed">No Claude login or inference is started here. No Anthropic API-key fallback. Credentials and subscription billing remain owned by the official Claude application.</Text></Stack></Card>
     {!returnTo && <Button component="a" href="#projects" variant="subtle" color="dark" rightSection={<ArrowRight size={16} aria-hidden="true" />} className="inline-link-button">Choose project goal and planning model</Button>}
     <Modal opened={confirmDisconnect} onClose={() => setConfirmDisconnect(false)} title="Disconnect OpenAI?" centered>
       <Stack><Text>This removes DAVE's selected stored connection. Planning will need a new connection; saved plans and evidence remain. It does not cancel your provider subscription.</Text><Group><Button variant="default" onClick={() => setConfirmDisconnect(false)}>Keep connection</Button><Button color="red" disabled={busy} onClick={() => { setConfirmDisconnect(false); void action("disconnect"); }}>Confirm disconnect</Button></Group></Stack>

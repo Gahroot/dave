@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import { openDb } from "../src/db/index.ts";
+import { SCHEMA_VERSION, openDb } from "../src/db/index.ts";
 import { repo as portfolioRepo } from "../src/db/repo.ts";
 import { deliveryRepo, DeliveryError } from "../src/db/delivery-repo.ts";
 import type { DeliveryGoal, DeliveryPlanDraft, DeliveryState } from "../src/model/delivery-schema.ts";
@@ -80,7 +80,7 @@ describe("additive delivery v5 migration", () => {
     const before = tables.map((t) => old.prepare(`SELECT * FROM ${t}`).all());
     old.close();
     const db = open(dir);
-    expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: 11 });
+    expect(db.prepare("SELECT version FROM schema_meta").get()).toMatchObject({ version: SCHEMA_VERSION });
     expect(tables.map((t) => db.prepare(`SELECT * FROM ${t}`).all())).toEqual(before);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(deliveryRepo(db).read("preserved")).toMatchObject({ revision: 0, goal: null, plans: [], history: [] });

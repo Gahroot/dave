@@ -4,14 +4,15 @@ import { deliveryRepo } from "../db/delivery-repo.ts";
 import { meetingStore } from "../meetings/store.ts";
 import type { MeetingItem } from "../meetings/types.ts";
 import type {
-  Basis, ChangeEntry, EvidenceState, FocusState, Freshness, IntelItem, ItemKind, ItemStatus, Objective, Owner, ProjectFocusRow, ProjectIntel,
-  ProjectOutcome, Proposal, ReadinessLevel, SourceHealth, DeliveryStage,
+  Basis, ChangeEntry, DeliveryPlan, EvidenceState, FocusState, Freshness, IntelItem, ItemKind, ItemStatus, Lane, MarkableStep, Objective, Owner,
+  ProjectFocusRow, ProjectIntel, ProjectOutcome, Proposal, ReadinessLevel, SourceHealth, DeliveryStage,
 } from "./types.ts";
-import { READINESS_LEVELS } from "./types.ts";
-import { intelStore, itemId, type IntelStore } from "./store.ts";
+import { LANES, READINESS_LEVELS } from "./types.ts";
+import { intelStore, itemId, type IntelStore, type StoredOutcome } from "./store.ts";
 import { reconcileProject, type IntelModelHook, type ReconcileInput, type ReconcileReport } from "./reconcile.ts";
-import { deriveReadiness, deriveStage, projectOutcome } from "./outcome.ts";
+import { deriveStage, projectOutcome, readinessWithSteps } from "./outcome.ts";
 import { computeGaps, prioritizeAll, type PrioritizeProject, type ProjectObjectives } from "./prioritize.ts";
+import { deliveryPlan, nextMoveText, proposalOrder, type DeliveryInput } from "./delivery.ts";
 
 export class IntelError extends Error {
   readonly code: "invalid" | "not-found" | "conflict";
@@ -36,8 +37,12 @@ export type IntelServiceOptions = {
 
 export type ItemFields = Partial<{
   title: string; detail: string | null; status: ItemStatus; evidenceState: EvidenceState; owner: Owner; dueDate: string | null;
-  acceptance: string[]; locked: boolean; readinessReached: ReadinessLevel | null; confirm: boolean;
+  acceptance: string[]; locked: boolean; readinessReached: ReadinessLevel | null; confirm: boolean; lane: Lane | null; goal: string | null;
 }>;
+
+/** One finish-line item pulled from a pasted agreement, after you ticked it. */
+export type FinishLineInput = { title: string; detail?: string | null; acceptance?: string[]; goal?: string | null };
+export const MAX_ACCEPTANCE_CRITERIA = 20;
 
 export function intelService(db: Db, options: IntelServiceOptions) {
   const now = options.now ?? (() => new Date());
@@ -126,8 +131,8 @@ export function intelService(db: Db, options: IntelServiceOptions) {
     const items = store.items(projectId);
     const p = findProject(projectId);
     const hasActivity = !!(p && (p.activity.lastCommitAt || p.tasks.length));
-    const readiness = deriveReadiness(items);
     const outcome = store.outcome(projectId);
+    const readiness = readinessWithSteps(items, outcome);
     const fresh = freshnessOf(projectId, sources);
     const down = sources.filter((s) => s.state === "degraded" || s.state === "unavailable");
     const uncertain = fresh === "stale" || fresh === "never" ? (fresh === "never" ? "This project has never been reconciled." : `Last reconciled ${store.reconciled(projectId)?.at ?? "a long time ago"}; information may be out of date.`)
@@ -136,6 +141,18 @@ export function intelService(db: Db, options: IntelServiceOptions) {
       projectId, projectName: projectName(projectId), items,
       stage: outcome?.stageOverride ?? deriveStage(items, readiness, hasActivity), readiness, hasOutcome: !!outcome,
       outcomeDraftPending: store.proposals(projectId).some((x) => x.kind === "outcome_draft" && x.status === "pending"), uncertain,
+    };
+  }
+
+  /** Everything the pure delivery core needs for one project. Meetings are optional: a failure means "never seen". */
+  function deliveryInput(projectId: string, items: IntelItem[] = store.items(projectId), pending: Proposal[] = store.proposals(projectId).filter((x) => x.status === "pending")): DeliveryInput {
+    let lastClientMeetingAt: string | null = null;
+    try { lastClientMeetingAt = meetings.lastMeetingFor(projectId)?.at ?? null; } catch { /* meetings unavailable */ }
+    return {
+      projectId, projectName: projectName(projectId), now: now(), outcome: store.outcome(projectId),
+      draftPending: pending.some((x) => x.kind === "outcome_draft"), items, pending,
+      agentTasks: (findProject(projectId)?.tasks ?? []).map((t) => ({ title: t.title, status: t.status, summary: t.summary })),
+      lastClientMeetingAt,
     };
   }
 
@@ -187,10 +204,10 @@ export function intelService(db: Db, options: IntelServiceOptions) {
     const sources = sourceHealth();
     const { inputs, byProject, queue } = compute(sources);
     const pending = store.pendingProposals();
-    const rank: Record<string, number> = { conflict: 0, deadline_change: 1, new_commitment: 2, scope_change: 3, new_requirement: 4, mark_complete: 5, mark_obsolete: 6, outcome_draft: 7, clarification: 8, };
-    const decisions = [...pending].sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9) || Number(b.material) - Number(a.material) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    const decisions = [...pending].sort(proposalOrder);
     const rows: ProjectFocusRow[] = inputs.map((inp): ProjectFocusRow => {
       const items = inp.items;
+      const plan = deliveryPlan(deliveryInput(inp.projectId, items, pending.filter((x) => x.projectId === inp.projectId)));
       const outcome = projectOutcome(store, inp.projectId, items, !!findProject(inp.projectId)?.activity.lastCommitAt);
       const reached = items.map((i) => i.readinessReached).filter((x): x is ReadinessLevel => x !== null);
       const top = READINESS_LEVELS.filter((l) => reached.includes(l)).pop() ?? null;
@@ -208,6 +225,7 @@ export function intelService(db: Db, options: IntelServiceOptions) {
         },
         nextCommitment: next?.dueDate ? { title: next.title, dueDate: next.dueDate } : null,
         freshness: freshnessOf(inp.projectId, sources), lastReconciledAt: rec?.at ?? null,
+        delivery: plan.progress, nextMove: nextMoveText(plan),
       };
     }).filter((r) => r.objective || r.counts.requirements || r.counts.milestonesTotal || r.counts.pendingProposals || r.outcome || r.lastReconciledAt)
       .sort((a, b) => (queue.findIndex((o) => o.projectId === a.projectId) + 1 || 9999) - (queue.findIndex((o) => o.projectId === b.projectId) + 1 || 9999) || a.projectName.localeCompare(b.projectName) || a.projectId.localeCompare(b.projectId));
@@ -235,9 +253,11 @@ export function intelService(db: Db, options: IntelServiceOptions) {
     const inp = prioritizeInput(id, sources);
     const objectives = prioritizeAll([inp], now()).byProject.get(id) ?? { objective: null, others: [] };
     const outcome: ProjectOutcome | null = projectOutcome(store, id, inp.items, !!findProject(id)?.activity.lastCommitAt);
+    const proposals = store.proposals(id);
+    const plan: DeliveryPlan = deliveryPlan(deliveryInput(id, inp.items, proposals.filter((x) => x.status === "pending")));
     return {
-      projectId: id, projectName: inp.projectName, outcome, items: inp.items, objective: objectives.objective, otherActions: objectives.others,
-      proposals: store.proposals(id).sort((a, b) => (a.status === "pending" ? 0 : 1) - (b.status === "pending" ? 0 : 1) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)),
+      projectId: id, projectName: inp.projectName, outcome, items: inp.items, objective: objectives.objective, otherActions: objectives.others, plan,
+      proposals: proposals.sort((a, b) => (a.status === "pending" ? 0 : 1) - (b.status === "pending" ? 0 : 1) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)),
       history: store.changes(id, 50), gaps: computeGaps(inp), freshness: freshnessOf(id, sources), lastReconciledAt: store.reconciled(id)?.at ?? null,
     };
   }
@@ -246,16 +266,36 @@ export function intelService(db: Db, options: IntelServiceOptions) {
 
   const humanProv = (label: string) => ({ sourceKind: "human" as const, sourceId: null, label, quote: null, observedAt: now().toISOString(), confidence: "high" as const, link: null });
   const refresh = (projectId: string, trigger: string): void => { store.tx(() => recordObjectives(compute().byProject, trigger)); void projectId; };
+  /** Real progress is you verifying: becoming verified stamps the moment, leaving verified clears it. */
+  const stampVerified = (before: IntelItem, next: IntelItem, at: string): void => {
+    if (next.evidenceState !== "verified") next.verifiedAt = null;
+    else if (before.evidenceState !== "verified" || !next.verifiedAt) next.verifiedAt = at;
+  };
+  const isWorkKind = (k: ItemKind): boolean => k === "requirement" || k === "milestone";
 
-  function putOutcome(projectId: string, v: { desiredOutcome: string; acceptanceCriteria: string[]; stage?: DeliveryStage; lock?: boolean }): ProjectIntel {
+  /** Delivery fields survive every outcome save; the first save is the moment the finish line was confirmed. */
+  const deliveryFields = (prev: StoredOutcome | null, at: string): Pick<StoredOutcome, "confirmedAt" | "startDate" | "targetDate" | "liveAt" | "usingAt" | "signedOffAt" | "lastDemoAt"> => ({
+    confirmedAt: prev?.confirmedAt ?? at, startDate: prev?.startDate ?? null, targetDate: prev?.targetDate ?? null,
+    liveAt: prev?.liveAt ?? null, usingAt: prev?.usingAt ?? null, signedOffAt: prev?.signedOffAt ?? null, lastDemoAt: prev?.lastDemoAt ?? null,
+  });
+  const confirmedOutcome = (projectId: string): StoredOutcome => {
+    if (!knownProject(projectId)) throw new IntelError("not-found", "Unknown project");
+    const o = store.outcome(projectId);
+    if (!o) throw new IntelError("conflict", "Confirm the finish line first");
+    return o;
+  };
+
+  function putOutcome(projectId: string, v: { desiredOutcome: string; acceptanceCriteria: string[]; stage?: DeliveryStage; lock?: boolean; targetDate?: string | null; startDate?: string | null }): ProjectIntel {
     if (!knownProject(projectId)) throw new IntelError("not-found", "Unknown project");
     const at = now().toISOString();
     const prev = store.outcome(projectId);
+    const kept = deliveryFields(prev, at);
     store.tx(() => {
       store.saveOutcome({
         projectId, desiredOutcome: v.desiredOutcome, acceptanceCriteria: v.acceptanceCriteria,
         stageOverride: v.stage ?? prev?.stageOverride ?? null, basis: "confirmed", locked: v.lock ?? prev?.locked ?? false,
         provenance: [...(prev?.provenance ?? []), humanProv("Edited by you")].slice(-10), updatedAt: at,
+        ...kept, targetDate: v.targetDate === undefined ? kept.targetDate : v.targetDate, startDate: v.startDate === undefined ? kept.startDate : v.startDate,
       });
       store.addChange({ projectId, kind: "human_edit", summary: `Delivery outcome ${prev ? "edited" : "set"}: ${v.desiredOutcome.slice(0, 120)}`, sources: ["human"] }, at);
     });
@@ -276,6 +316,7 @@ export function intelService(db: Db, options: IntelServiceOptions) {
         evidenceState: work || v.kind === "commitment" ? "not_implemented" : "unknown", readinessTarget: work ? "usable_by_client" : null, readinessReached: null,
         owner: v.owner ?? (v.kind === "blocker" ? "client" : "me"), dueDate: v.dueDate ?? null, acceptance: v.acceptance ?? [], dependsOn: v.dependsOn ?? [], locked: false,
         provenance: [humanProv("Added by you")], lastSupportedAt: at, createdAt: at, updatedAt: at,
+        lane: null, goal: null, verifiedAt: null, sentAt: null, reopenCount: 0,
       }, v.title);
       store.addChange({ projectId, kind: "human_edit", summary: `Added ${v.kind}: ${v.title}`, itemId: id, sources: ["human"] }, at);
     });
@@ -299,8 +340,13 @@ export function intelService(db: Db, options: IntelServiceOptions) {
     if (v.acceptance !== undefined) set("acceptance", v.acceptance);
     if (v.locked !== undefined) set("locked", v.locked);
     if (v.readinessReached !== undefined) set("readinessReached", v.readinessReached);
+    if (v.lane !== undefined) set("lane", v.lane);
+    if (v.goal !== undefined) set("goal", v.goal);
     if (v.confirm || touched.length) set("basis", "confirmed" as Basis);
     if (!touched.length) return projectIntel(item.projectId);
+    // A new goal is a new path: the "not right" count starts again.
+    if (touched.includes("goal")) next.reopenCount = 0;
+    stampVerified(item, next, at);
     next.updatedAt = at;
     store.tx(() => {
       store.updateItem(next);
@@ -318,13 +364,14 @@ export function intelService(db: Db, options: IntelServiceOptions) {
     detail: (v) => v === null || typeof v === "string", acceptance: (v) => Array.isArray(v) && v.every((x) => typeof x === "string"),
   };
 
-  function resolveProposal(id: string, accept: boolean, note: string | null): FocusState {
+  function resolveProposal(id: string, accept: boolean, note: string | null, lane?: Lane): FocusState {
     const p = store.proposal(id);
     if (!p) throw new IntelError("not-found", "Unknown proposal");
+    if (lane !== undefined && (!accept || p.kind !== "new_requirement" || !LANES.includes(lane))) throw new IntelError("invalid", "A lane can only be chosen when accepting a new requirement");
     if (p.status !== "pending") throw new IntelError("conflict", "Proposal already resolved");
     const at = now().toISOString();
     store.tx(() => {
-      if (accept) apply(p, at);
+      if (accept) apply(p, at, lane ?? null);
       else if (p.kind === "new_commitment" && p.itemId) {
         const it = store.item(p.itemId);
         if (it && it.basis === "inferred" && !it.locked) store.updateItem({ ...it, status: "dropped", updatedAt: at });
@@ -336,13 +383,14 @@ export function intelService(db: Db, options: IntelServiceOptions) {
     return focus();
   }
 
-  function apply(p: Proposal, at: string): void {
+  function apply(p: Proposal, at: string, lane: Lane | null): void {
     const patch = p.patch;
     const op = patch.op;
     if (op === "set_outcome" && typeof patch.desiredOutcome === "string" && Array.isArray(patch.acceptanceCriteria)) {
       const prev = store.outcome(p.projectId);
       store.saveOutcome({ projectId: p.projectId, desiredOutcome: patch.desiredOutcome, acceptanceCriteria: patch.acceptanceCriteria.filter((x): x is string => typeof x === "string"),
-        stageOverride: prev?.stageOverride ?? null, basis: "confirmed", locked: prev?.locked ?? false, provenance: [...p.provenance, humanProv("Accepted by you")].slice(-10), updatedAt: at });
+        stageOverride: prev?.stageOverride ?? null, basis: "confirmed", locked: prev?.locked ?? false, provenance: [...p.provenance, humanProv("Accepted by you")].slice(-10), updatedAt: at,
+        ...deliveryFields(prev, at) });
     } else if (op === "create_item" && p.itemId && patch.item && typeof patch.item === "object") {
       const src = patch.item as Record<string, unknown>;
       if (store.item(p.itemId)) return;
@@ -352,15 +400,138 @@ export function intelService(db: Db, options: IntelServiceOptions) {
         status: "open", evidenceState: "not_implemented", readinessTarget: "usable_by_client", readinessReached: null, owner: OWNERS.includes(src.owner as Owner) ? (src.owner as Owner) : "unknown",
         dueDate: typeof src.dueDate === "string" ? src.dueDate : null, acceptance: Array.isArray(src.acceptance) ? src.acceptance.filter((x): x is string => typeof x === "string") : [],
         dependsOn: [], locked: false, provenance: [...p.provenance, humanProv("Accepted by you")], lastSupportedAt: at, createdAt: at, updatedAt: at,
+        lane, goal: null, verifiedAt: null, sentAt: null, reopenCount: 0,
       }, String(src.title ?? p.summary));
     } else if (op === "update_item" && typeof patch.itemId === "string" && patch.fields && typeof patch.fields === "object") {
       const item = store.item(patch.itemId);
       if (!item) return;
       const next: Record<string, unknown> = { ...item };
       for (const [k, v] of Object.entries(patch.fields as Record<string, unknown>)) if (FIELD_CHECK[k]?.(v)) next[k] = v;
-      store.updateItem({ ...(next as IntelItem), basis: "confirmed", updatedAt: at });
+      const merged: IntelItem = { ...(next as IntelItem), basis: "confirmed", updatedAt: at };
+      stampVerified(item, merged, at);
+      store.updateItem(merged);
       if ((patch.fields as Record<string, unknown>).status === "done") store.addChange({ projectId: p.projectId, kind: "item_completed", summary: `"${item.title}" marked done by you`, itemId: item.id, sources: ["human"] }, at);
     }
+  }
+
+  // ---- delivery: schedule, steps, verification and the copy list ------------------------------------------
+
+  function saveDelivery(projectId: string, o: StoredOutcome, change: Partial<StoredOutcome>, summary: string, kind: ChangeEntry["kind"] = "human_edit"): ProjectIntel {
+    const at = now().toISOString();
+    store.tx(() => {
+      store.saveOutcome({ ...o, ...change, updatedAt: at });
+      store.addChange({ projectId, kind, summary, sources: ["human"] }, at);
+    });
+    refresh(projectId, "delivery edit");
+    return projectIntel(projectId);
+  }
+
+  function setSchedule(projectId: string, v: { targetDate?: string | null; startDate?: string | null }): ProjectIntel {
+    const o = confirmedOutcome(projectId);
+    const targetDate = v.targetDate === undefined ? o.targetDate : v.targetDate;
+    const startDate = v.startDate === undefined ? o.startDate : v.startDate;
+    if (targetDate === o.targetDate && startDate === o.startDate) return projectIntel(projectId);
+    const parts = [targetDate !== o.targetDate ? (targetDate ? `target date ${targetDate}` : "target date cleared") : null,
+      startDate !== o.startDate ? (startDate ? `start date ${startDate}` : "start date cleared") : null].filter(Boolean);
+    return saveDelivery(projectId, o, { targetDate, startDate }, `Schedule edited: ${parts.join(", ")}`);
+  }
+
+  const STEP_FIELD = { live: "liveAt", using: "usingAt", signed_off: "signedOffAt" } as const satisfies Record<MarkableStep, keyof StoredOutcome>;
+  const STEP_TEXT: Record<MarkableStep, string> = { live: "Live", using: "Client using it", signed_off: "Signed off" };
+
+  function setStep(projectId: string, step: MarkableStep, reached: boolean): ProjectIntel {
+    const o = confirmedOutcome(projectId);
+    const field = STEP_FIELD[step];
+    if (!!o[field] === reached) return projectIntel(projectId);
+    const change: Partial<StoredOutcome> = {};
+    change[field] = reached ? now().toISOString() : null;
+    return saveDelivery(projectId, o, change,
+      `${STEP_TEXT[step]} ${reached ? "marked reached" : "unmarked"} by you`, reached ? "item_completed" : "human_edit");
+  }
+
+  function markDemo(projectId: string): ProjectIntel {
+    const o = confirmedOutcome(projectId);
+    return saveDelivery(projectId, o, { lastDemoAt: now().toISOString() }, "Latest work shown to the client");
+  }
+
+  /** Copying is sending. Every id must be this project's build work, or nothing changes (authorised at the data layer). */
+  function markSent(projectId: string, itemIds: string[], sent: boolean): ProjectIntel {
+    if (!knownProject(projectId)) throw new IntelError("not-found", "Unknown project");
+    const ids = [...new Set(itemIds)].sort();
+    const items = ids.map((id) => store.item(id));
+    const valid = items.filter((i): i is IntelItem => !!i && i.projectId === projectId && isWorkKind(i.kind));
+    if (!ids.length || valid.length !== ids.length) throw new IntelError("invalid", "Every task must be build work in this project");
+    const changing = valid.filter((i) => !!i.sentAt !== sent);
+    if (!changing.length) return projectIntel(projectId);
+    const at = now().toISOString();
+    store.tx(() => {
+      for (const i of changing) store.updateItem({ ...i, sentAt: sent ? at : null, updatedAt: at });
+      const only = changing.length === 1 ? changing[0] : undefined;
+      store.addChange({ projectId, kind: "human_edit", itemId: only?.id ?? null, sources: ["human"],
+        summary: sent ? `Copied for EZcoder: ${only ? `"${only.title}"` : `${changing.length} tasks`}` : `Put back in the task list: ${only ? `"${only.title}"` : `${changing.length} tasks`}` }, at);
+    });
+    refresh(projectId, sent ? "tasks copied" : "tasks put back");
+    return projectIntel(projectId);
+  }
+
+  function verifyItem(id: string): ProjectIntel {
+    const item = store.item(id);
+    if (!item) throw new IntelError("not-found", "Unknown item");
+    if (item.evidenceState === "verified" && item.status === "done") return projectIntel(item.projectId);
+    const at = now().toISOString();
+    store.tx(() => {
+      store.updateItem({ ...item, evidenceState: "verified", status: "done", basis: "confirmed", verifiedAt: at, readinessReached: item.readinessReached ?? "code_complete", updatedAt: at });
+      store.addChange({ projectId: item.projectId, kind: "item_completed", summary: `"${item.title}" verified by you`, itemId: id, sources: ["human"] }, at);
+    });
+    refresh(item.projectId, "item verified");
+    return projectIntel(item.projectId);
+  }
+
+  function reopenItem(id: string, note: string | null): ProjectIntel {
+    const item = store.item(id);
+    if (!item) throw new IntelError("not-found", "Unknown item");
+    const at = now().toISOString();
+    store.tx(() => {
+      store.updateItem({ ...item, evidenceState: "not_implemented", status: "open", basis: "confirmed", verifiedAt: null, sentAt: null, reopenCount: item.reopenCount + 1, updatedAt: at });
+      store.addChange({ projectId: item.projectId, kind: "human_edit", summary: `"${item.title}" is not right yet${note ? `: ${note}` : ""}`, itemId: id, sources: ["human"] }, at);
+    });
+    refresh(item.projectId, "item reopened");
+    return projectIntel(item.projectId);
+  }
+
+  /** Adds ticked agreement lines as confirmed finish-line requirements. Existing items are skipped and counted. */
+  function addFinishLineItems(projectId: string, entries: FinishLineInput[], acceptance: string[] = []): { added: number; skipped: number; intel: ProjectIntel } {
+    if (!knownProject(projectId)) throw new IntelError("not-found", "Unknown project");
+    if (!entries.length) throw new IntelError("invalid", "Nothing to add");
+    const o = store.outcome(projectId);
+    if (acceptance.length && !o) throw new IntelError("conflict", "Confirm the finish line first to add acceptance lines");
+    const at = now().toISOString();
+    const seen = new Set<string>();
+    let added = 0;
+    let skipped = 0;
+    store.tx(() => {
+      for (const e of entries) {
+        const id = itemId(projectId, "requirement", e.title);
+        if (seen.has(id) || store.item(id)) { skipped += 1; continue; }
+        seen.add(id);
+        store.insertItem({
+          id, projectId, kind: "requirement", title: e.title, detail: e.detail ?? null, basis: "confirmed", status: "open", evidenceState: "not_implemented",
+          readinessTarget: "usable_by_client", readinessReached: null, owner: "me", dueDate: null, acceptance: e.acceptance ?? [], dependsOn: [], locked: false,
+          provenance: [humanProv("From your agreement")], lastSupportedAt: at, createdAt: at, updatedAt: at,
+          lane: "finish_line", goal: e.goal ?? null, verifiedAt: null, sentAt: null, reopenCount: 0,
+        }, e.title);
+        added += 1;
+      }
+      const criteria = o ? [...o.acceptanceCriteria] : [];
+      for (const line of acceptance) if (criteria.length < MAX_ACCEPTANCE_CRITERIA && !criteria.some((c) => c.trim().toLowerCase() === line.trim().toLowerCase())) criteria.push(line.trim());
+      if (o && criteria.length !== o.acceptanceCriteria.length) store.saveOutcome({ ...o, acceptanceCriteria: criteria, updatedAt: at });
+      if (added || (o && criteria.length !== o.acceptanceCriteria.length)) {
+        store.addChange({ projectId, kind: "human_edit", sources: ["human"],
+          summary: `Added ${added} finish-line item${added === 1 ? "" : "s"} from your agreement${skipped ? ` (${skipped} already there)` : ""}` }, at);
+      }
+    });
+    refresh(projectId, "agreement imported");
+    return { added, skipped, intel: projectIntel(projectId) };
   }
 
   function brief(objectiveId: string): string | null {
@@ -381,7 +552,10 @@ export function intelService(db: Db, options: IntelServiceOptions) {
   }
   function close(): void { if (timer) { clearInterval(timer); timer = null; } }
 
-  return { store, reconcile, reconcileSync, focus, projectIntel, putOutcome, addItem, patchItem, resolveProposal, brief, objectiveExists, knownProject, startScheduler, close, sourceHealth, gather };
+  return {
+    store, reconcile, reconcileSync, focus, projectIntel, putOutcome, addItem, patchItem, resolveProposal, brief, objectiveExists, knownProject, startScheduler, close, sourceHealth, gather,
+    deliveryInput, setSchedule, setStep, markDemo, markSent, verifyItem, reopenItem, addFinishLineItems,
+  };
 }
 export type IntelService = ReturnType<typeof intelService>;
 export type { ChangeEntry };

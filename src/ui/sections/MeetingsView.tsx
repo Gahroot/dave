@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Stack, Text, Title } from "@mantine/core";
+import { Alert, Button, Stack, Text } from "@mantine/core";
 import { CircleCheck, Plug, Settings, Sparkles, Unplug } from "lucide-react";
 import { CountPill, StatusIcon, StatusMark } from "../components/Status.tsx";
 import { MEETING_STATUS as MEETING_MARK, PROMISE_GROUP } from "../status.ts";
@@ -8,7 +8,7 @@ import { deliveryApi } from "../delivery-api.ts";
 import { relative } from "../format.ts";
 import { groupPromises, MEETING_STATUS_LABELS } from "../meetings-model.ts";
 import { parseRoute, routeLink, type MeetingSection } from "../navigation.ts";
-import { EmptyState, PageHeader } from "../components/WorkspacePrimitives.tsx";
+import { EmptyState, PageHeader, PanelHead } from "../components/WorkspacePrimitives.tsx";
 import { MeetingItemRow, type ItemAction } from "../components/MeetingItemRow.tsx";
 import { MeetingDetail } from "./MeetingDetail.tsx";
 import { MeetingInstructions } from "./MeetingInstructions.tsx";
@@ -86,19 +86,19 @@ export function MeetingsView({ route, paused = false, refreshedAt = null }: { ro
     {!items && !error && <Text role="status">Loading meetings…</Text>}
 
     {section === "promises" && items && (promiseGroups.length === 0
-      ? <EmptyState title="No open promises">Promises you make in analyzed meetings appear here with the words you used.</EmptyState>
-      : promiseGroups.map(group => <section key={group.id} aria-labelledby={`promises-${group.id}`} className="meeting-group">
-        <Title order={2} className="meeting-group-title" id={`promises-${group.id}`}><StatusIcon spec={PROMISE_GROUP[group.id]} />{group.label} <CountPill value={group.items.length} tone={PROMISE_GROUP[group.id].tone} decorative={false} /></Title>
+      ? <div className="app-panel"><EmptyState title="No open promises">Promises you make in analyzed meetings appear here with the words you used.</EmptyState></div>
+      : promiseGroups.map(group => <section key={group.id} aria-labelledby={`promises-${group.id}`} className="meeting-group app-panel">
+        <PanelHead id={`promises-${group.id}`} title={group.label} spec={PROMISE_GROUP[group.id]} count={group.items.length} countTone={PROMISE_GROUP[group.id].tone} />
         <ul className="meeting-list">{group.items.map(item => <MeetingItemRow key={item.id} item={item} busy={busyId === item.id} onAction={onAction} returnTo={here} showKind={false} />)}</ul>
       </section>))}
 
     {section === "asks" && items && (items.asks.length === 0
-      ? <EmptyState title="No open client asks">Suggestions and pain points your clients raise appear here, each pain point with a small feature idea.</EmptyState>
-      : <ul className="meeting-list">{items.asks.map(item => <MeetingItemRow key={item.id} item={item} busy={busyId === item.id} onAction={onAction} returnTo={here} />)}</ul>)}
+      ? <div className="app-panel"><EmptyState title="No open client asks">Suggestions and pain points your clients raise appear here, each pain point with a small feature idea.</EmptyState></div>
+      : <section className="app-panel" aria-label="Client asks"><ul className="meeting-list">{items.asks.map(item => <MeetingItemRow key={item.id} item={item} busy={busyId === item.id} onAction={onAction} returnTo={here} />)}</ul></section>)}
 
     {section === "list" && meetings && (meetings.length === 0
-      ? <EmptyState title="No meetings imported yet">{connected ? "DAVE checks Fathom every 5 minutes." : "Connect Fathom to start."}</EmptyState>
-      : <div className="workspace-list" aria-label="Imported meetings">{meetings.map(m => { const spec = MEETING_MARK[m.status]; return <a key={m.recordingId} className="workspace-row" data-tone={m.status === "failed" ? "red" : undefined} href={routeLink("meetings", { section: "list", rec: m.recordingId })}>
+      ? <div className="app-panel"><EmptyState title="No meetings imported yet">{connected ? "DAVE checks Fathom every 5 minutes." : "Connect Fathom to start."}</EmptyState></div>
+      : <div className="workspace-list app-panel" aria-label="Imported meetings">{meetings.map(m => { const spec = MEETING_MARK[m.status]; return <a key={m.recordingId} className="workspace-row" data-tone={m.status === "failed" ? "red" : undefined} href={routeLink("meetings", { section: "list", rec: m.recordingId })}>
         <span className="row-main">
           <StatusIcon spec={spec} />
           <span className="row-title">{m.headline ?? m.title}</span>
@@ -113,6 +113,6 @@ export function MeetingsView({ route, paused = false, refreshedAt = null }: { ro
         </span>
       </a>; })}</div>)}
 
-    {section === "instructions" && <MeetingInstructions state={state} onChanged={reload} />}
+    {section === "instructions" && <div className="app-panel panel-body is-form"><MeetingInstructions state={state} onChanged={reload} /></div>}
   </Stack>;
 }

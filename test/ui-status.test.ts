@@ -1,13 +1,15 @@
-import { READINESS_LEVELS } from "../src/intel/types.ts";
+import { DELIVERY_STEPS, LANES, READINESS_LEVELS } from "../src/intel/types.ts";
 import { describe, expect, it } from "vitest";
 import {
   CHECK_RESULT, CONNECTION, CRITERION_REPORTED, FRESHNESS, INBOX_CATEGORY, INBOX_KIND, ITEM_KIND, ITEM_STATUS, MEETING_STATUS,
-  MILESTONE_STATUS, NEXT_STEP, EVIDENCE_STATE, READINESS_LEVEL, BASIS, PROPOSAL_KIND, OBJECTIVE_CATEGORY, DELIVERY_FRESHNESS, SOURCE_HEALTH, PROMISE_GROUP, PROMISE_STATE, RUN_STATUS, TONES, checkResult, hasRail, type StatusSpec,
+  MILESTONE_STATUS, NEXT_STEP, EVIDENCE_STATE, READINESS_LEVEL, BASIS, PROPOSAL_KIND, OBJECTIVE_CATEGORY, DELIVERY_FRESHNESS, SOURCE_HEALTH, PROMISE_GROUP, PROMISE_STATE, RUN_STATUS, DELIVERY_STEP, MOVE_KIND, TASK_STATE, LANE, TONES, checkResult, hasRail, type StatusSpec,
 } from "../src/ui/status.ts";
 
 const maps: Record<string, Readonly<Record<string, StatusSpec>>> = {
   RUN_STATUS, MILESTONE_STATUS, NEXT_STEP, CHECK_RESULT, CRITERION_REPORTED, FRESHNESS, INBOX_KIND, INBOX_CATEGORY,
   PROMISE_GROUP, PROMISE_STATE, ITEM_STATUS, ITEM_KIND, MEETING_STATUS, CONNECTION,
+  EVIDENCE_STATE, READINESS_LEVEL, BASIS, PROPOSAL_KIND, OBJECTIVE_CATEGORY, DELIVERY_FRESHNESS, SOURCE_HEALTH,
+  DELIVERY_STEP, MOVE_KIND, TASK_STATE, LANE,
 };
 
 describe("status language", () => {
@@ -46,6 +48,22 @@ describe("status language", () => {
     expect(READINESS_LEVEL.code_complete.tone).not.toBe("green");
     expect(READINESS_LEVEL.client_accepted.tone).toBe("green");
     expect(DELIVERY_FRESHNESS.never.tone).not.toBe(DELIVERY_FRESHNESS.fresh.tone);
+  });
+  it("maps every delivery step, move, task state and lane with whose-move tones", () => {
+    expect(Object.keys(DELIVERY_STEP)).toEqual([...DELIVERY_STEPS]);
+    expect(Object.keys(LANE)).toEqual([...LANES]);
+    expect(Object.keys(MOVE_KIND).sort()).toEqual(["chase", "confirm_finish_line", "decide", "demo", "rethink", "step", "target_date", "verify"]);
+    expect(Object.keys(TASK_STATE).sort()).toEqual(["ready", "sent", "waiting"]);
+    expect(TASK_STATE.ready).toMatchObject({ tone: "gray", label: "Ready to send" });
+    expect(TASK_STATE.sent).toMatchObject({ tone: "blue", label: "Sent to EZcoder" });
+    expect(TASK_STATE.waiting).toMatchObject({ tone: "amber", label: "Paused" });
+    expect(LANE.finish_line.tone).toBe("blue");
+    expect(LANE.extra).toMatchObject({ tone: "gray", label: "Extra" });
+    expect(LANE.phase2).toMatchObject({ tone: "gray", label: "Phase 2" });
+    expect(MOVE_KIND.chase.tone).toBe("red");
+    for (const k of ["confirm_finish_line", "decide", "verify", "rethink", "step", "demo", "target_date"] as const) expect(MOVE_KIND[k].tone).toBe("amber");
+    for (const k of ["production_ready", "live", "using"] as const) expect(DELIVERY_STEP[k].tone).not.toBe("green");
+    expect(DELIVERY_STEP.signed_off.tone).toBe("green");
   });
   it("only puts rails on states that need the owner or flag a failure", () => {
     expect(hasRail(RUN_STATUS.review.tone)).toBe(true);

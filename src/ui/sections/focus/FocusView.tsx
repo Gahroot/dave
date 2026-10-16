@@ -1,25 +1,22 @@
-import { useRef, useState } from "react";
-import { Alert, Button, Group, List, Stack, Text, Title } from "@mantine/core";
-import { ArrowRight, Check, RefreshCw, X } from "lucide-react";
-import type { FocusState, Objective, Proposal } from "../../../intel/types.ts";
-import { CopyText } from "../../components/CopyText.tsx";
-import { CountPill, StatusMark } from "../../components/Status.tsx";
-import { EmptyState, PageHeader } from "../../components/WorkspacePrimitives.tsx";
-import {
-  BRIEF_NOTICE, STAGE_LABEL, agoLabel, briefMode, countLine, dueState, freshnessText, isFirstRun, proposalOrigin, readinessSummary,
-  sortDecisions, sortProjectRows, sourcesWithWarnings, SOURCE_NAME, OWNER_LABEL,
-} from "../../focus-model.ts";
+import { useRef, useState, type ReactNode } from "react";
+import { Alert, Button, Group, Stack, Text } from "@mantine/core";
+import { ArrowRight, RefreshCw } from "lucide-react";
+import type { FocusState, ProjectFocusRow } from "../../../intel/types.ts";
+import { HelpTip, StatusGroup, StatusMark, StatusTile } from "../../components/Status.tsx";
+import { EmptyState, PageHeader, PanelHead } from "../../components/WorkspacePrimitives.tsx";
+import { behindBand, behindLine, freshnessText, homeGroups, homePulse, isFirstRun, sortDecisions, sourcesWithWarnings, stepLabel } from "../../focus-model.ts";
 import { intelApi } from "../../intel-api.ts";
 import { parseRoute, routeLink } from "../../navigation.ts";
-import { ProjectIntelView } from "./ProjectIntelView.tsx";
-import { OBJECTIVE_CATEGORY, PROPOSAL_KIND, SOURCE_HEALTH } from "../../status.ts";
-import { BasisMark, BlockerList, ErrorLine, FreshnessMark, ProvenanceList, ReadinessStrip } from "./parts.tsx";
+import { DELIVERY_STEP, LANE, MOVE_KIND, PROMISE_GROUP, type StatusSpec } from "../../status.ts";
+import { BehindDial, DoneMeter } from "./DeliveryPlan.tsx";
 import { Changes, Decisions, External, Sources } from "./FocusSections.tsx";
+import { ProjectIntelView } from "./ProjectIntelView.tsx";
+import { ErrorLine } from "./parts.tsx";
 import { useIntelResource } from "./useIntelResource.ts";
 
 const errorText = (e: unknown) => e instanceof Error ? e.message : "Request failed. Retry.";
 
-/** Delivery Intelligence home: one next action first, then everything that supports or challenges it. */
+/** Delivery Intelligence home: client projects most behind first, each with the one move that unblocks it. */
 export function FocusView({ paused }: { paused: boolean }) {
   const { data, setData, pending, applyPending, error, loading, reload } = useIntelResource((s) => intelApi.focus(s), "focus", paused);
   const [busy, setBusy] = useState<string | null>(null);
@@ -37,64 +34,97 @@ export function FocusView({ paused }: { paused: boolean }) {
   const refresh = <Button variant="default" leftSection={<RefreshCw size={14} aria-hidden="true" />} loading={busy === "reconcile"} disabled={!!busy && busy !== "reconcile"} onClick={reconcile}>Refresh from sources</Button>;
 
   return <Stack gap="lg" className="focus-view">
-    <PageHeader title="Focus" actions={refresh}>
-      <Text c="dimmed" size="sm">The single most valuable next action across your projects, and why. DAVE decides what should happen next; it never starts anything.</Text>
+    <PageHeader title="Focus: most behind first" actions={refresh}>
+      <Text c="dimmed" size="sm">Your client projects, the one furthest behind at the top, each with its next move. DAVE only suggests; it never starts anything or contacts anyone.</Text>
     </PageHeader>
     {pending && <Alert color="blue" role="status" title="Newer information is ready"><Group gap="xs">Your open edit was left alone.<Button size="xs" onClick={applyPending}>Apply update</Button></Group></Alert>}
     {actionError && <ErrorLine message={actionError} onRetry={() => setActionError(null)} />}
-    {loading && !data && <Text role="status">Loading your focus…</Text>}
+    {loading && !data && <Text role="status">Loading your projects…</Text>}
     {error && <ErrorLine message={data ? `Showing the last loaded information. ${error}` : error} onRetry={reload} />}
     {data && <>
       {isFirstRun(data)
-        ? <EmptyState title="No outcomes yet" action={refresh}>DAVE has not read your projects yet. Refresh to let DAVE draft a desired outcome for each project from meetings, git history and delivery plans. Nothing is applied until you confirm it.</EmptyState>
-        : <TopAction objective={data.top} now={now} onRefresh={reconcile} />}
-      <FocusQueue state={data} now={now} />
+        ? <div className="app-panel"><EmptyState title="No projects read yet" action={refresh}>DAVE has not read your projects yet. Refresh to let DAVE draft a finish line for each project from meetings, git history and delivery plans. Nothing is applied until you confirm it.</EmptyState></div>
+        : <><Pulse state={data} /><ProjectOrder rows={data.projects} now={now} /></>}
       <Decisions decisions={sortDecisions(data.decisions)} busy={busy} now={now}
-        onAct={(p, act) => void run(`proposal:${p.id}`, () => act === "accept" ? intelApi.accept(p.id) : intelApi.reject(p.id))} />
+        onAct={(p, act, lane) => void run(`proposal:${p.id}`, () => act === "accept" ? intelApi.accept(p.id, undefined, lane) : intelApi.reject(p.id))} />
       <External state={data} now={now} />
-      <Changes state={data} now={now} />
-      <Sources state={data} now={now} />
+      <SourcesAndChanges state={data} now={now} />
     </>}
   </Stack>;
 }
 
-function TopAction({ objective: o, now, onRefresh }: { objective: Objective | null; now: number; onRefresh: () => void }) {
-  if (!o) return <section aria-labelledby="top-h"><Title order={2} id="top-h">Next action</Title><Text c="dimmed">Nothing is known to need doing. This can mean everything is done, or that DAVE has too little information; <Button variant="subtle" size="compact-sm" onClick={onRefresh}>refresh from sources</Button> to check.</Text></section>;
-  const due = dueState(o.dueDate, now);
-  const mode = briefMode(o);
-  return <section aria-labelledby="top-h" className="focus-top next-action-row">
-    <Stack gap="sm">
-      <Group gap="md" className="row-sub"><span>{o.projectName}</span><span>{STAGE_LABEL[o.stage]}</span><StatusMark spec={OBJECTIVE_CATEGORY[o.category]} />{due.kind !== "none" && <span>{due.label}</span>}</Group>
-      <Title order={2} id="top-h">Next action: {o.objective}</Title>
-      {o.uncertain && <Alert color="violet" role="note" title="Uncertain">{o.uncertain}</Alert>}
-      <div><Title order={3} size="h5">Why now</Title><Text>{o.whyNow}</Text></div>
-      <div><Title order={3} size="h5">Definition of done</Title>
-        {o.definitionOfDone.length ? <List listStyleType="none" spacing={4}>{o.definitionOfDone.map((d, i) => <List.Item key={i}><span className="done-box" aria-hidden="true" /> {d}</List.Item>)}</List> : <Text c="dimmed" size="sm">No definition of done recorded yet. Add one before starting.</Text>}</div>
-      <div><Title order={3} size="h5">Blocked by</Title><BlockerList blockers={o.blockers} /></div>
-      <div><Title order={3} size="h5">Evidence</Title><ProvenanceList items={o.evidence} now={now} /></div>
-      <Group gap="md" align="flex-start" className="action-bar">
-        {mode === "copy" && o.brief && <Stack gap={4}><CopyText text={o.brief} label="Copy EZcoder brief" /><Text size="xs" c="dimmed">{BRIEF_NOTICE}</Text></Stack>}
-        {mode === "human" && <StatusMark spec={OBJECTIVE_CATEGORY[o.category]} strong>Human step: you do this yourself. No EZcoder brief.</StatusMark>}
-        {mode === "none" && <Text size="sm" c="dimmed">No brief is available yet for this action.</Text>}
-        <Button component="a" variant="subtle" href={routeLink("focus", { project: o.projectId })} rightSection={<ArrowRight size={14} aria-hidden="true" />}>Open {o.projectName}</Button>
-      </Group>
-    </Stack>
+const calm = (spec: StatusSpec): StatusSpec => ({ ...spec, tone: "gray" });
+
+/** Today at a glance: four real counts, each repeated in its panel below. Calm gray when the count is zero. */
+function Pulse({ state }: { state: FocusState }) {
+  const p = homePulse(state);
+  const tiles: { label: string; value: number; spec: StatusSpec }[] = [
+    { label: "In delivery", value: p.inDelivery, spec: LANE.finish_line },
+    { label: "Overdue", value: p.overdue, spec: p.overdue ? PROMISE_GROUP.overdue : calm(PROMISE_GROUP.overdue) },
+    { label: "Decisions waiting on you", value: p.decisions, spec: p.decisions ? MOVE_KIND.decide : calm(MOVE_KIND.decide) },
+    { label: "Waiting on a client", value: p.waitingOnClient, spec: p.waitingOnClient ? MOVE_KIND.chase : calm(MOVE_KIND.chase) },
+  ];
+  return <ul className="pulse-strip" aria-label="Today at a glance">
+    {tiles.map(t => <li key={t.label} className="pulse-tile" data-tone={t.spec.tone}>
+      <StatusTile spec={t.spec} size={18} />
+      <span className="pulse-text"><strong className="pulse-n">{t.value}</strong><span className="pulse-label">{t.label}</span></span>
+    </li>)}
+  </ul>;
+}
+
+/** Ranked projects first; projects without a confirmed finish line and delivered ones wait in collapsed groups. */
+function ProjectOrder({ rows, now }: { rows: readonly ProjectFocusRow[]; now: number }) {
+  const { ranked, setup, delivered } = homeGroups(rows);
+  return <section aria-labelledby="order-h" className="app-panel project-order">
+    <PanelHead id="order-h" title="In delivery" spec={LANE.finish_line} count={ranked.length} note="Most behind first, each with the one move that unblocks it."
+      help={<HelpTip label="How the order is worked out">
+        <p>Each project gets a behind score from 0 to 100. Time used against work done counts 50%, how far it is from delivered counts 30%, and days since you last verified something or marked a step count 20%.</p>
+        <p>A project with no target date is scored on the last two alone (60% and 40%). Money is never part of the order.</p>
+        <p>70 or more reads far behind (red), 40 to 69 behind (amber), under 40 on pace (blue).</p>
+      </HelpTip>} />
+    {ranked.length
+      ? <ol className="plain-list" aria-label="Projects in delivery, most behind first">{ranked.map((r, i) => <ProjectRow key={r.projectId} row={r} now={now}
+          lead={<span className="rank-tile" data-tone={behindBand(r.delivery.behind?.score ?? 0).tone} aria-hidden="true">{i + 1}</span>} />)}</ol>
+      : <Text c="dimmed" className="panel-empty">{setup.length ? "No project has a confirmed finish line yet. Open one below and confirm what done means; DAVE ranks it from then on." : "No projects in delivery."}</Text>}
+    {setup.length > 0 && <StatusGroup spec={MOVE_KIND.confirm_finish_line} title="Needs a finish line" count={setup.length} open={!ranked.length} note="Not ranked until you confirm what done means">
+      <ul className="plain-list">{setup.map(r => <ProjectRow key={r.projectId} row={r} now={now} lead={<StatusTile spec={MOVE_KIND.confirm_finish_line} />} />)}</ul>
+    </StatusGroup>}
+    {delivered.length > 0 && <StatusGroup spec={DELIVERY_STEP.signed_off} title="Delivered" count={delivered.length} open={false}>
+      <ul className="plain-list">{delivered.map(r => <ProjectRow key={r.projectId} row={r} now={now} lead={<StatusTile spec={DELIVERY_STEP.signed_off} />} />)}</ul>
+    </StatusGroup>}
   </section>;
 }
 
-function FocusQueue({ state, now }: { state: FocusState; now: number }) {
-  const rows = sortProjectRows(state.projects);
-  return <section aria-labelledby="queue-h"><Group gap="xs"><Title order={2} id="queue-h">Focus queue</Title><CountPill value={rows.length} decorative={false} /></Group>
-    {!rows.length ? <Text c="dimmed">No projects found yet.</Text> : <ul className="plain-list">{rows.map(r => <li key={r.projectId} className="workspace-row focus-row">
-      <div className="row-main">
-        <span />
-        <div><a className="row-title" href={routeLink("focus", { project: r.projectId })}><strong>{r.projectName}</strong></a> <span className="quiet-tag">{STAGE_LABEL[r.stage]}</span>
-          <Text size="sm">{r.objective ? r.objective.objective : r.outcome ? "No next action found." : "No outcome yet: DAVE will draft one on refresh."}</Text></div>
-        <span className="row-aside"><FreshnessMark freshness={r.freshness} /></span>
-        <div className="row-sub"><ReadinessStrip reached={r.readinessReached} compact /><span className="visually-hidden">{readinessSummary(r.readinessReached)}</span></div>
-        <div className="row-sub"><span>{countLine(r.counts)}</span>{r.outcomeBasis && <BasisMark basis={r.outcomeBasis} />}{r.nextCommitment && <span>Next promise: {r.nextCommitment.title}, {dueState(r.nextCommitment.dueDate, now).label}</span>}<span>{freshnessText(r.freshness, r.lastReconciledAt, now)}</span></div>
-      </div></li>)}</ul>}
-  </section>;
+/** One row per project: name and flags, the next move, then the step, the score's parts and freshness. */
+function ProjectRow({ row: r, lead, now }: { row: ProjectFocusRow; lead: ReactNode; now: number }) {
+  const p = r.delivery;
+  const score = p.confirmed && !p.delivered ? p.behind?.score ?? null : null;
+  const band = score === null ? null : behindBand(score);
+  return <li className="project-order-row" data-tone={band && band.tone !== "blue" ? band.tone : undefined}>
+    <span className="project-order-rank">{lead}</span>
+    <span className="project-order-name">
+      <a href={routeLink("focus", { project: r.projectId })}>{r.projectName}</a>
+      {p.waitingOnClient && <StatusMark spec={MOVE_KIND.chase}>Waiting on client</StatusMark>}
+      {p.overdue && <StatusMark spec={PROMISE_GROUP.overdue} strong>Overdue</StatusMark>}
+    </span>
+    <span className={r.nextMove ? "project-order-move" : "project-order-move is-calm"}>{r.nextMove ? <><ArrowRight size={14} aria-hidden="true" /><span><span className="visually-hidden">Next: </span>{r.nextMove}</span></> : "Nothing is waiting on you"}</span>
+    <span className="project-order-sub">
+      {p.confirmed && <span>{stepLabel(p)}</span>}
+      {!p.delivered && <span>{behindLine(p)}</span>}
+      <span>{freshnessText(r.freshness, r.lastReconciledAt, now)}</span>
+    </span>
+    {p.confirmed && <span className="project-order-meter"><DoneMeter progress={p} /></span>}
+    {score !== null && <span className="project-order-score"><BehindDial score={score} /></span>}
+  </li>;
+}
+
+/** Sources and the change log are reference material: one disclosure, with source problems counted on the summary. */
+function SourcesAndChanges({ state, now }: { state: FocusState; now: number }) {
+  const warnings = sourcesWithWarnings(state.sources, now).filter(s => s.warning !== null).length;
+  return <details className="quiet-details intel-disclosure">
+    <summary>Sources and recent changes{warnings ? ` (${warnings} source ${warnings === 1 ? "needs" : "need"} attention)` : ""}</summary>
+    <Stack gap="lg" pt="sm"><Sources state={state} now={now} /><Changes state={state} now={now} /></Stack>
+  </details>;
 }
 
 /** Lazy entry: `#focus` is the home, `#focus?project=<id>` the drill-down. Invalid ids fall back to the home. */

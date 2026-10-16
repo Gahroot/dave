@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Db } from "../db/index.ts";
 import type {
   Basis, ChangeEntry, EvidenceState, IntelItem, ItemKind, ItemStatus, Owner, Proposal, ProposalKind, ProposalStatus,
-  Provenance, ReadinessLevel, DeliveryStage, SourceHealth, Objective,
+  Provenance, ReadinessLevel, DeliveryStage, SourceHealth, Objective, Lane,
 } from "./types.ts";
 
 type Row = Record<string, unknown>;
@@ -26,7 +26,12 @@ const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 export type StoredOutcome = {
   projectId: string; desiredOutcome: string; acceptanceCriteria: string[]; stageOverride: DeliveryStage | null;
   basis: Basis; locked: boolean; provenance: Provenance[]; updatedAt: string;
+  /** When a person first confirmed this finish line. */
+  confirmedAt: string | null;
+  startDate: string | null; targetDate: string | null;
+  liveAt: string | null; usingAt: string | null; signedOffAt: string | null; lastDemoAt: string | null;
 };
+const LANE_VALUES: readonly string[] = ["finish_line", "extra", "phase2"];
 export type ObjectiveSnapshot = { projectId: string; objectiveId: string; objective: string; score: number; reasons: Objective["scoreReasons"]; chosenAt: string };
 export type NewProposal = {
   projectId: string; kind: ProposalKind; material: boolean; summary: string; detail?: string | null;
@@ -41,6 +46,9 @@ export function mapItem(r: Row): IntelItem {
     owner: r.owner as Owner, dueDate: str(r.due_date), acceptance: json(r.acceptance_json, []), dependsOn: json(r.depends_json, []),
     locked: r.locked === 1, provenance: json(r.provenance_json, []), lastSupportedAt: String(r.last_supported_at),
     createdAt: String(r.created_at), updatedAt: String(r.updated_at),
+    lane: typeof r.lane === "string" && LANE_VALUES.includes(r.lane) ? r.lane as Lane : null,
+    goal: str(r.goal), verifiedAt: str(r.verified_at), sentAt: str(r.sent_at),
+    reopenCount: typeof r.reopen_count === "number" && r.reopen_count > 0 ? r.reopen_count : 0,
   };
 }
 
@@ -49,13 +57,14 @@ export function intelStore(db: Db, names: (projectId: string) => string = (id) =
     item: db.prepare("SELECT * FROM intel_items WHERE id=?"),
     items: db.prepare("SELECT * FROM intel_items WHERE project_id=? ORDER BY created_at, id"),
     allItems: db.prepare("SELECT * FROM intel_items ORDER BY project_id, created_at, id"),
-    insertItem: db.prepare(`INSERT INTO intel_items(id,project_id,kind,norm_key,title,detail,basis,status,evidence_state,readiness_target,readiness_reached,owner,due_date,acceptance_json,depends_json,locked,provenance_json,last_supported_at,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
-    updateItem: db.prepare("UPDATE intel_items SET title=?,detail=?,basis=?,status=?,evidence_state=?,readiness_target=?,readiness_reached=?,owner=?,due_date=?,acceptance_json=?,depends_json=?,locked=?,provenance_json=?,last_supported_at=?,updated_at=? WHERE id=?"),
+    insertItem: db.prepare(`INSERT INTO intel_items(id,project_id,kind,norm_key,title,detail,basis,status,evidence_state,readiness_target,readiness_reached,owner,due_date,acceptance_json,depends_json,locked,provenance_json,last_supported_at,created_at,updated_at,lane,goal,verified_at,sent_at,reopen_count)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+    updateItem: db.prepare("UPDATE intel_items SET title=?,detail=?,basis=?,status=?,evidence_state=?,readiness_target=?,readiness_reached=?,owner=?,due_date=?,acceptance_json=?,depends_json=?,locked=?,provenance_json=?,last_supported_at=?,updated_at=?,lane=?,goal=?,verified_at=?,sent_at=?,reopen_count=? WHERE id=?"),
     outcome: db.prepare("SELECT * FROM intel_outcomes WHERE project_id=?"),
     outcomes: db.prepare("SELECT project_id FROM intel_outcomes"),
-    saveOutcome: db.prepare(`INSERT INTO intel_outcomes(project_id,desired_outcome,acceptance_json,stage_override,basis,locked,provenance_json,updated_at) VALUES (?,?,?,?,?,?,?,?)
-      ON CONFLICT(project_id) DO UPDATE SET desired_outcome=excluded.desired_outcome,acceptance_json=excluded.acceptance_json,stage_override=excluded.stage_override,basis=excluded.basis,locked=excluded.locked,provenance_json=excluded.provenance_json,updated_at=excluded.updated_at`),
+    saveOutcome: db.prepare(`INSERT INTO intel_outcomes(project_id,desired_outcome,acceptance_json,stage_override,basis,locked,provenance_json,updated_at,confirmed_at,start_date,target_date,live_at,using_at,signed_off_at,last_demo_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(project_id) DO UPDATE SET desired_outcome=excluded.desired_outcome,acceptance_json=excluded.acceptance_json,stage_override=excluded.stage_override,basis=excluded.basis,locked=excluded.locked,provenance_json=excluded.provenance_json,updated_at=excluded.updated_at,
+        confirmed_at=excluded.confirmed_at,start_date=excluded.start_date,target_date=excluded.target_date,live_at=excluded.live_at,using_at=excluded.using_at,signed_off_at=excluded.signed_off_at,last_demo_at=excluded.last_demo_at`),
     proposal: db.prepare("SELECT * FROM intel_proposals WHERE id=?"),
     proposals: db.prepare("SELECT * FROM intel_proposals WHERE project_id=? ORDER BY created_at, id"),
     pending: db.prepare("SELECT * FROM intel_proposals WHERE status='pending' ORDER BY created_at, id"),
@@ -97,20 +106,24 @@ export function intelStore(db: Db, names: (projectId: string) => string = (id) =
     insertItem(i: IntelItem, key: string): void {
       q.insertItem.run(i.id, i.projectId, i.kind, normaliseKey(key), i.title, i.detail, i.basis, i.status, i.evidenceState, i.readinessTarget,
         i.readinessReached, i.owner, i.dueDate, JSON.stringify(i.acceptance), JSON.stringify(i.dependsOn), i.locked ? 1 : 0,
-        JSON.stringify(i.provenance), i.lastSupportedAt, i.createdAt, i.updatedAt);
+        JSON.stringify(i.provenance), i.lastSupportedAt, i.createdAt, i.updatedAt, i.lane, i.goal, i.verifiedAt, i.sentAt, i.reopenCount);
     },
     updateItem(i: IntelItem): void {
       q.updateItem.run(i.title, i.detail, i.basis, i.status, i.evidenceState, i.readinessTarget, i.readinessReached, i.owner, i.dueDate,
-        JSON.stringify(i.acceptance), JSON.stringify(i.dependsOn), i.locked ? 1 : 0, JSON.stringify(i.provenance), i.lastSupportedAt, i.updatedAt, i.id);
+        JSON.stringify(i.acceptance), JSON.stringify(i.dependsOn), i.locked ? 1 : 0, JSON.stringify(i.provenance), i.lastSupportedAt, i.updatedAt,
+        i.lane, i.goal, i.verifiedAt, i.sentAt, i.reopenCount, i.id);
     },
     outcome(projectId: string): StoredOutcome | null {
       const r = q.outcome.get(projectId) as Row | undefined;
       return r ? { projectId, desiredOutcome: String(r.desired_outcome), acceptanceCriteria: json(r.acceptance_json, []), stageOverride: str(r.stage_override) as DeliveryStage | null,
-        basis: r.basis as Basis, locked: r.locked === 1, provenance: json(r.provenance_json, []), updatedAt: String(r.updated_at) } : null;
+        basis: r.basis as Basis, locked: r.locked === 1, provenance: json(r.provenance_json, []), updatedAt: String(r.updated_at),
+        confirmedAt: str(r.confirmed_at), startDate: str(r.start_date), targetDate: str(r.target_date),
+        liveAt: str(r.live_at), usingAt: str(r.using_at), signedOffAt: str(r.signed_off_at), lastDemoAt: str(r.last_demo_at) } : null;
     },
     outcomeProjects: (): string[] => (q.outcomes.all() as Row[]).map((r) => String(r.project_id)),
     saveOutcome(o: StoredOutcome): void {
-      q.saveOutcome.run(o.projectId, o.desiredOutcome, JSON.stringify(o.acceptanceCriteria), o.stageOverride, o.basis, o.locked ? 1 : 0, JSON.stringify(o.provenance), o.updatedAt);
+      q.saveOutcome.run(o.projectId, o.desiredOutcome, JSON.stringify(o.acceptanceCriteria), o.stageOverride, o.basis, o.locked ? 1 : 0, JSON.stringify(o.provenance), o.updatedAt,
+        o.confirmedAt, o.startDate, o.targetDate, o.liveAt, o.usingAt, o.signedOffAt, o.lastDemoAt);
     },
     proposal: (id: string): Proposal | null => { const r = q.proposal.get(id) as Row | undefined; return r ? mapProposal(r) : null; },
     proposals: (projectId: string): Proposal[] => (q.proposals.all(projectId) as Row[]).map(mapProposal),

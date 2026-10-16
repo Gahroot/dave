@@ -13,6 +13,16 @@ export const DELIVERY_STAGES: readonly DeliveryStage[] = ["discovery", "building
 export type ReadinessLevel = "code_complete" | "deployed" | "usable_by_client" | "client_accepted";
 export const READINESS_LEVELS: readonly ReadinessLevel[] = ["code_complete", "deployed", "usable_by_client", "client_accepted"];
 
+/** Where a piece of work sits relative to the agreed finish line. null on an item = DAVE decides at read time. */
+export type Lane = "finish_line" | "extra" | "phase2";
+export const LANES: readonly Lane[] = ["finish_line", "extra", "phase2"];
+
+/** The four delivery steps, in order. Production-ready comes from verified items; the rest are marked by you. */
+export type DeliveryStep = "production_ready" | "live" | "using" | "signed_off";
+export const DELIVERY_STEPS: readonly DeliveryStep[] = ["production_ready", "live", "using", "signed_off"];
+export type MarkableStep = "live" | "using" | "signed_off";
+export const MARKABLE_STEPS: readonly MarkableStep[] = ["live", "using", "signed_off"];
+
 export type Confidence = "high" | "medium" | "low";
 /** confirmed = a human confirmed or wrote it; inferred = DAVE's reading of evidence. */
 export type Basis = "confirmed" | "inferred";
@@ -74,6 +84,16 @@ export type IntelItem = {
   lastSupportedAt: string;
   createdAt: string;
   updatedAt: string;
+  /** Your filing of this work. null = DAVE guesses at read time (labelled as a guess). */
+  lane: Lane | null;
+  /** Your "So that …" goal for the task. null = DAVE drafts one. */
+  goal: string | null;
+  /** When you last verified it. Only this counts as real progress. */
+  verifiedAt: string | null;
+  /** When its task text was copied to EZcoder (copying is sending). */
+  sentAt: string | null;
+  /** How many times you said "Not right" since the goal last changed. */
+  reopenCount: number;
 };
 
 export type ProjectOutcome = {
@@ -172,6 +192,104 @@ export type SourceHealth = {
   detail: string | null;
 };
 
+/** "How far behind" with its named parts, each 0–100. Weights change when there is no target date. */
+export type BehindScore = {
+  score: number;
+  /** null when there is no target date. */
+  schedule: number | null;
+  distance: number;
+  stalled: number;
+  stalledDays: number;
+  weights: { schedule: number; distance: number; stalled: number };
+};
+
+/** Delivery progress derived only from verified items and steps you marked. Shown with its parts, never alone. */
+export type DeliveryProgress = {
+  /** A person confirmed the finish line (an outcome row exists). */
+  confirmed: boolean;
+  delivered: boolean;
+  percentDone: number;
+  finishLineItems: number;
+  verifiedItems: number;
+  steps: Record<DeliveryStep, boolean>;
+  /** First step not yet reached; null when delivered. */
+  currentStep: DeliveryStep | null;
+  /** 1–4, or 5 when delivered. */
+  stepNumber: number;
+  startDate: string | null;
+  targetDate: string | null;
+  /** One-click suggestion: the latest finish-line or own-commitment due date. */
+  suggestedTargetDate: string | null;
+  lastRealProgressAt: string | null;
+  lastClientSeenAt: string | null;
+  /** Verified finish-line items the client has not seen in a meeting or demo since. */
+  unseenByClient: number;
+  waitingOnClient: boolean;
+  overdue: boolean;
+  /** null when the finish line is not confirmed. */
+  behind: BehindScore | null;
+};
+
+export type MoveKind = "confirm_finish_line" | "decide" | "chase" | "verify" | "rethink" | "step" | "demo" | "target_date";
+/** At most this many moves are shown at once; the rest sit behind a disclosure. */
+export const VISIBLE_MOVES = 3;
+
+/** Something only you can do. DAVE never does it for you. */
+export type Move = {
+  /** Readable composite, e.g. "verify:<itemId>". */
+  id: string;
+  kind: MoveKind;
+  title: string;
+  why: string;
+  itemId: string | null;
+  proposalId: string | null;
+  proposalKind: ProposalKind | null;
+  step: MarkableStep | null;
+  suggestedDate: string | null;
+  doneWhen: string[];
+};
+
+export type TaskState = "ready" | "waiting" | "sent";
+
+/** One standalone EZcoder task, as copyable text. DAVE never launches it. */
+export type SuggestedTask = {
+  itemId: string;
+  lane: Lane;
+  /** The lane is DAVE's guess (no stored choice). */
+  laneGuessed: boolean;
+  /** What to build (the item title). */
+  build: string;
+  /** "So that …" */
+  goal: string;
+  goalDrafted: boolean;
+  why: string;
+  whySource: string | null;
+  doneWhen: string[];
+  doneWhenDrafted: boolean;
+  state: TaskState;
+  /** Why it is paused, when state is waiting. */
+  waitingOn: string | null;
+  /** The move that unpauses it, when one exists. */
+  waitingMoveId: string | null;
+  orderReason: string;
+  sentAt: string | null;
+  /** Sent because a matching EZcoder task already exists (matched by title). */
+  inEzcoder: boolean;
+  text: string;
+};
+
+export type DeliveryPlan = {
+  progress: DeliveryProgress;
+  moves: Move[];
+  ready: SuggestedTask[];
+  waiting: SuggestedTask[];
+  sent: SuggestedTask[];
+  /** Bells & whistles: open work in the extra and phase2 lanes. */
+  extras: SuggestedTask[];
+  copyAll: string;
+  extrasCopy: string;
+};
+
 export type ProjectFocusRow = {
   projectId: string;
   projectName: string;
@@ -185,6 +303,9 @@ export type ProjectFocusRow = {
   nextCommitment: { title: string; dueDate: string } | null;
   freshness: Freshness;
   lastReconciledAt: string | null;
+  delivery: DeliveryProgress;
+  /** First move's title, else "Send N tasks to EZcoder", else the first pause reason. */
+  nextMove: string | null;
 };
 
 /** GET /api/intel/focus: everything the home screen needs (R6). */
@@ -219,15 +340,24 @@ export type ProjectIntel = {
   gaps: { itemId: string | null; text: string; state: EvidenceState; category: ObjectiveCategory }[];
   freshness: Freshness;
   lastReconciledAt: string | null;
+  /** Finish line, your moves and the copyable task list. */
+  plan: DeliveryPlan;
 };
 
 /** Routes (all under /api/intel, loopback + CSRF guard like the rest):
  *  GET  /focus                               -> FocusState
  *  GET  /projects/:id                        -> ProjectIntel
  *  POST /reconcile            {projectId?}   -> FocusState   (explicit refresh; also runs periodically)
- *  PUT  /projects/:id/outcome {desiredOutcome, acceptanceCriteria, stage?, lock?} -> ProjectIntel (human edit => basis confirmed)
+ *  PUT  /projects/:id/outcome {desiredOutcome, acceptanceCriteria, stage?, lock?, targetDate?, startDate?} -> ProjectIntel (human edit => basis confirmed)
+ *  PUT  /projects/:id/schedule {targetDate, startDate?}   -> ProjectIntel (409 until the finish line is confirmed)
+ *  POST /projects/:id/steps   {step: live|using|signed_off, reached} -> ProjectIntel
+ *  POST /projects/:id/demo    {}             -> ProjectIntel  ("Shown to the client")
+ *  POST /projects/:id/tasks/sent {itemIds, sent} -> ProjectIntel (copying is sending; every id must belong to the project)
+ *  POST /projects/:id/finish-line {items[], acceptance?} -> {added, skipped, intel}
  *  POST /projects/:id/items   {kind,title,detail?,dueDate?,owner?,acceptance?,dependsOn?} -> ProjectIntel (human-added, confirmed)
- *  PATCH /items/:itemId       {title?,detail?,status?,evidenceState?,owner?,dueDate?,acceptance?,locked?,readinessReached?,confirm?} -> ProjectIntel
- *  POST /proposals/:id/accept | /reject   {note?}  -> FocusState
+ *  PATCH /items/:itemId       {title?,detail?,status?,evidenceState?,owner?,dueDate?,acceptance?,locked?,readinessReached?,confirm?,lane?,goal?} -> ProjectIntel
+ *  POST /items/:itemId/verify {}             -> ProjectIntel
+ *  POST /items/:itemId/reopen {note?}        -> ProjectIntel
+ *  POST /proposals/:id/accept | /reject   {note?, lane? (accept, new_requirement only)}  -> FocusState
  *  GET  /objectives/:id/brief                -> {brief:string}
  */

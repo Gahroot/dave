@@ -1,8 +1,8 @@
-import { Button, Stack, Text, Title } from "@mantine/core";
+import { Button, Stack, Text } from "@mantine/core";
 import { ArrowRight, CircleAlert, CircleCheck, Clock } from "lucide-react";
 import type { Coverage, PortfolioIssue } from "../../shared/types.ts";
-import { PageHeader, EmptyState } from "../components/WorkspacePrimitives.tsx";
-import { CountPill, StatusIcon, StatusMark } from "../components/Status.tsx";
+import { PageHeader, EmptyState, PanelHead } from "../components/WorkspacePrimitives.tsx";
+import { StatusIcon, StatusMark } from "../components/Status.tsx";
 import { FRESHNESS, type StatusSpec } from "../status.ts";
 import { relative } from "../format.ts";
 
@@ -20,11 +20,11 @@ export function Issues({ issues, coverage }: { issues: PortfolioIssue[]; coverag
       {!!coverage.waitingOutsideCap && <StatusMark spec={WAITING}><strong>{coverage.waitingOutsideCap}</strong> waiting outside the scan</StatusMark>}
     </div>}
     <Text size="sm" c="dimmed">Source read failures, not failures in your code. Use Refresh above to retry discovery.</Text>
-    {!issues.length && <EmptyState title="No source errors in the loaded snapshot">This does not prove unchecked projects are healthy.</EmptyState>}
-    {sources.map(source => { const list = issues.filter(issue => issue.adapter === source); return <section className="workspace-detail issue-source" key={source} aria-labelledby={`issue-${source}`}><Stack gap="xs">
-      <Title order={3} id={`issue-${source}`} className="meeting-group-title"><StatusIcon spec={SOURCE_ERROR} />{source} <CountPill value={list.length} tone="red" decorative={false} /></Title>
+    {!issues.length && <div className="app-panel"><EmptyState title="No source errors in the loaded snapshot">This does not prove unchecked projects are healthy.</EmptyState></div>}
+    {sources.map(source => { const list = issues.filter(issue => issue.adapter === source); return <section className="app-panel issue-source" key={source} aria-labelledby={`issue-${source}`}>
+      <PanelHead id={`issue-${source}`} title={source} spec={SOURCE_ERROR} count={list.length} countTone="red" />
       <ul className="result-list">{list.map((issue, index) => <li key={index} className="result-row"><StatusIcon spec={SOURCE_ERROR} /><span className="result-row-title">{issue.message}</span><span className="result-row-detail" title={issue.observedAt}>Observed {relative(issue.observedAt)}</span><details className="quiet-details"><summary>Source details</summary><Text size="sm">Path: {issue.path ?? "Not available"}</Text><Text size="sm">Observed: {issue.observedAt}</Text></details></li>)}</ul>
-    </Stack></section>; })}
+    </section>; })}
     {!issues.length && coverage && !coverage.unavailable && <StatusMark spec={{ tone: "green", icon: CircleCheck, label: "" }}>Every loaded source read cleanly.</StatusMark>}
     <Button component="a" href="#projects?waiting=1" variant="default" rightSection={<ArrowRight size={16} aria-hidden="true" />}>Review waiting projects</Button>
   </Stack>;

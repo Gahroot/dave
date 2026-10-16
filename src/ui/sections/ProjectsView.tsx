@@ -1,6 +1,5 @@
 import { Button, Group, Stack, Text, TextInput } from "@mantine/core";
-import { ChevronLeft, EyeOff, Lightbulb, Pin, Search, UserRound } from "lucide-react";
-import type { ReactNode } from "react";
+import { ChevronLeft, EyeOff, Folder, Lightbulb, Pin, Search, UserRound } from "lucide-react";
 import type { InboxItem, PortfolioProject, ProjectSummary } from "../../shared/types.ts";
 import { hasHumanRequest } from "../../core/relevance.ts";
 import { ProjectWorkspace } from "./ProjectWorkspace.tsx";
@@ -12,6 +11,16 @@ import { parseRoute, routeLink } from "../navigation.ts";
 const INFERRED: StatusSpec = { tone: "violet", icon: Lightbulb, label: "Human request inferred" };
 const PINNED: StatusSpec = { tone: "blue", icon: Pin, label: "Pinned" };
 const HIDDEN: StatusSpec = { tone: "gray", icon: EyeOff, label: "Hidden" };
+const PROJECT: StatusSpec = { tone: "gray", icon: Folder, label: "Project" };
+/** The one state a row leads with, most urgent first: unreadable, a person may be waiting, stale, then your own marks. */
+const leadSpec = (project: PortfolioProject, inferred: boolean): StatusSpec => {
+  const scan = project.scanStatus ?? "cached";
+  if (scan === "unavailable") return FRESHNESS.unavailable;
+  if (inferred) return INFERRED;
+  if (scan === "cached") return FRESHNESS.cached;
+  if (project.override.pinned) return PINNED;
+  return project.override.hidden ? HIDDEN : PROJECT;
+};
 /** Middle-truncate a path so the project folder name, the part people recognise, stays visible. */
 const shortPath = (path: string, keep = 2) => { const parts = path.split("/").filter(Boolean); return parts.length > keep + 1 ? `…/${parts.slice(-keep).join("/")}` : path; };
 
@@ -38,18 +47,16 @@ export function ProjectsView({ projects, items, query, selectedId, waiting, onSe
     <div className="project-directory-toolbar"><TextInput aria-label="Search projects by name or full path" placeholder="Search projects by name or path" leftSection={<Search size={16} aria-hidden="true" />} value={query} onChange={e => onSearch(e.currentTarget.value)} />
     <Group gap="xs"><Button component="a" variant={waiting ? "filled" : "default"} leftSection={<UserRound size={16} aria-hidden="true" />} href={routeLink("projects", { q: query, id: selectedId, waiting: !waiting, hidden: navigation.hidden })} aria-pressed={waiting}>Waiting for me</Button><Button component="a" variant={navigation.hidden ? "filled" : "default"} leftSection={<EyeOff size={16} aria-hidden="true" />} href={routeLink("projects", { q: query, id: selectedId, hidden: !navigation.hidden, waiting })} aria-pressed={navigation.hidden}>Hidden projects</Button><Text role="status" size="sm" c="dimmed">{filtered.length} matching projects</Text></Group></div>
     <div>
-      <div className="workspace-list" aria-label="Project directory">
+      <div className="workspace-list app-panel" aria-label="Project directory">
         {!filtered.length && <EmptyState title="No matching projects" action={<Button component="a" href="#projects" variant="default">Clear filters</Button>} />}
         {filtered.map(project => {
           const scan = project.scanStatus ?? "cached";
           const inferred = hasHumanRequest(project);
-          // Show exceptions, not defaults: checked rows carry no freshness mark, the header already counts them.
-          // The lead mark is only for exceptions (cached, unavailable); tags below carry pinned and inferred.
-          const lead: StatusSpec | null = scan !== "checked" ? FRESHNESS[scan] : null;
-          const leadIcon: ReactNode = lead ? <StatusIcon spec={lead} /> : <span aria-hidden="true" />;
+          // Show exceptions, not defaults: checked rows carry no freshness tag, the header already counts them.
+          // The lead tile repeats the most urgent tag in colour; the words stay in the tags line below.
           return <a className="workspace-row" key={project.id} id={`project-row-${project.id}`} data-workspace-focus={`project:${project.id}`} aria-label={project.name} href={destination(project.id)} aria-current={selectedId === project.id ? "true" : undefined} data-tone={scan === "unavailable" && hasRail("red") ? "red" : undefined}>
             <span className="row-main">
-              {leadIcon}
+              <StatusIcon spec={leadSpec(project, inferred)} />
               <span className="row-title">{project.name}</span>
               <span className="row-aside project-directory-path" title={project.canonicalPath}>{shortPath(project.canonicalPath, 1)}</span>
               <span className="row-sub project-directory-next">{project.summary.suggestedNextAction || "No next action recorded"}</span>
