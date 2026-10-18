@@ -100,7 +100,6 @@ export function VoicePanel({ variant }: VoicePanelProps) {
           ? <button type="button" className={`voice-round${voice.holding ? " voice-on" : ""}`} disabled={!live} aria-pressed={voice.holding} aria-label="Hold to talk (or hold Space)"
             onPointerDown={() => voice.pushToTalk("down")} onPointerUp={() => voice.pushToTalk("up")} onPointerLeave={() => { if (voice.holding) voice.pushToTalk("up"); }}><Hand size={20} aria-hidden="true" /></button>
           : <button type="button" className={`voice-round${voice.muted ? " voice-on" : ""}`} disabled={!live} aria-pressed={voice.muted} aria-label={voice.muted ? "Unmute microphone" : "Mute microphone"} onClick={voice.toggleMute}>{voice.muted ? <MicOff size={20} aria-hidden="true" /> : <Mic size={20} aria-hidden="true" />}</button>}
-        {!active && <label className="voice-check voice-approve-toggle"><input type="checkbox" checked={voice.approveOnStart} onChange={e => voice.setApproveOnStart(e.target.checked)} />Approve all for this session</label>}
         <button type="button" className="voice-round" aria-label="Share a file" onClick={() => fileInput.current?.click()}><Paperclip size={20} aria-hidden="true" /></button>
         <input ref={fileInput} type="file" multiple hidden onChange={e => { share(e.currentTarget.files); e.currentTarget.value = ""; }} />
         <button type="button" className="voice-round" aria-label="Voice settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(v => !v)}><Settings size={20} aria-hidden="true" /></button>

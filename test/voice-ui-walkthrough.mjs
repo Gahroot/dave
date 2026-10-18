@@ -113,11 +113,53 @@ const outputOf = async (page, callId) => JSON.parse((await sent(page)).find(e =>
 const waitOutput = (page, callId) => waitSent(page, (e, a) => e.item?.type === 'function_call_output' && e.item.call_id === a, callId);
 const systemNote = (page, prefix) => waitSent(page, (e, a) => e.item?.role === 'system' && e.item.content?.[0]?.text?.startsWith(a), prefix);
 
-/** Interactive targets on the dark stage: named, at least 44 px, readable text. */
+/** With the drawer open on a wide screen, the page reflows beside it: nothing visible in the workspace runs under the
+ * drawer and the window never scrolls sideways. */
+async function auditReflow(page, label) {
+  const r = await page.evaluate(() => {
+    const drawer = document.querySelector('.voice-drawer')?.getBoundingClientRect();
+    if (!drawer) return { missing: true };
+    const under = [];
+    for (const el of document.querySelectorAll('.workspace-shell *')) {
+      if (el.closest('.voice-drawer') || !el.checkVisibility()) continue;
+      const b = el.getBoundingClientRect();
+      if (b.width && b.height && b.right > drawer.left + 1) under.push(`${el.tagName.toLowerCase()}.${[...el.classList].join('.')} right ${Math.round(b.right)}`);
+    }
+    return { missing: false, drawerLeft: Math.round(drawer.left), under: under.slice(0, 8), sideways: document.documentElement.scrollWidth > window.innerWidth };
+  });
+  if (r.missing) return problems.push(`${label}: drawer not open`);
+  if (r.under.length) problems.push(`${label}: page runs under the drawer (left ${r.drawerLeft}): ${r.under.join('; ')}`);
+  if (r.sideways) problems.push(`${label}: page scrolls sideways with the drawer open`);
+}
+
+/** Inbox rows were cut off under the open drawer. Runs first, while the fixture's six meeting promises are still in
+ * the Inbox (Clean up clears them later), at a wide and a narrower laptop width. */
+async function inboxBesideDrawer() {
+  for (const width of [1440, 1180]) {
+    const inbox = await newPage(width, 900);
+    await inbox.page.goto(`${BASE}/#queue`);
+    await inbox.page.getByRole('heading', { name: 'Ready to work' }).waitFor();
+    assert.ok(await inbox.page.locator('.workspace-content').getByText('Your promise').count() >= 6, 'Inbox rows present');
+    await inbox.page.getByRole('button', { name: 'Talk to DAVE (Alt+Shift+D)', exact: true }).click();
+    await inbox.page.getByRole('dialog', { name: 'Talk to DAVE' }).waitFor();
+    await auditReflow(inbox.page, `Inbox beside the drawer ${width}`);
+    await shot(inbox.page, `inbox-drawer-${width}`);
+    await inbox.context.close();
+  }
+}
+
+/** Interactive targets on the dark stage: named, at least 44 px, readable text, and the bottom controls on one
+ * row with the Talk/End label unwrapped (a crowded row once squeezed "Talk" into three lines at 390 px). */
 async function auditStage(page, label) {
   const report = await page.evaluate(() => {
     const stage = document.querySelector('[data-voice-panel]');
-    const small = [], unnamed = [];
+    const small = [], unnamed = [], squashed = [];
+    for (const row of stage.querySelectorAll('.voice-controls')) {
+      const kids = [...row.children].filter(el => el.getBoundingClientRect().width);
+      const tops = new Set(kids.map(el => Math.round(el.getBoundingClientRect().top)));
+      if (tops.size > 1) squashed.push(`controls on ${tops.size} rows`);
+      for (const el of kids) { const h = el.getBoundingClientRect().height; if (h > 48) squashed.push(`${el.getAttribute('aria-label') || el.textContent.trim()} ${Math.round(h)}px tall`); }
+    }
     for (const el of stage.querySelectorAll('button, select, input:not([type=file]):not([type=checkbox]), a[href]')) {
       const r = el.getBoundingClientRect();
       if (!r.width || !r.height) continue;
@@ -128,7 +170,7 @@ async function auditStage(page, label) {
     const bg = getComputedStyle(stage).backgroundColor;
     const colours = [...stage.querySelectorAll('.voice-detail, .voice-disclosure, .voice-line, .voice-chip, .voice-who, .voice-empty, .voice-card p, .voice-card strong, .voice-title')]
       .filter(el => el.getBoundingClientRect().width).map(el => [el.className, getComputedStyle(el).color, getComputedStyle(el.closest('.voice-card') ?? stage).backgroundColor]);
-    return { small, unnamed, bg, colours };
+    return { small, unnamed, squashed, bg, colours };
   });
   for (const [cls, fg, bg] of report.colours) {
     const solidBg = /rgba\(.*,\s*0(\.\d+)?\)$/.test(bg) && !bg.endsWith(', 1)') ? report.bg : bg;
@@ -137,6 +179,7 @@ async function auditStage(page, label) {
   }
   if (report.small.length) problems.push(`${label}: targets under 44px: ${report.small.join('; ')}`);
   if (report.unnamed.length) problems.push(`${label}: unnamed controls: ${report.unnamed.join('; ')}`);
+  if (report.squashed.length) problems.push(`${label}: squashed controls: ${report.squashed.join('; ')}`);
 }
 
 /** Approve all: a question is refused, the card button approves and runs the open card, writes then apply at once,
@@ -152,7 +195,8 @@ async function approveAllWalkthrough(beta) {
   await vdock.click();
   const vdrawer = vp.getByRole('dialog', { name: 'Talk to DAVE' });
   await vdrawer.waitFor();
-  await vdrawer.getByText('Approve all for this session', { exact: true }).waitFor();
+  await vdrawer.getByRole('button', { name: 'Talk', exact: true }).waitFor();
+  assert.equal(await vdrawer.getByText('Approve all for this session', { exact: true }).count(), 0, 'no Approve all switch before Talk: it is offered during the conversation');
   await vp.waitForTimeout(600);
   await vdrawer.locator('.voice-hero').screenshot({ path: `${out}/dave-hero-180.png` });
   const vstarted = vp.waitForResponse(r => r.url() === `${BASE}/api/voice/sessions` && r.request().method() === 'POST');
@@ -383,6 +427,7 @@ try {
   const acme = id('Acme Clinic Portal'), gamma = id('Gamma Freight Dashboard'), beta = id('Beta Bakery Ordering');
   // 0. Meeting noise first: Approve all by voice, then the Clean up page, which ends by clearing every noisy item so
   // the direction steps below run on a portfolio with no overdue meeting promises.
+  await inboxBesideDrawer();
   await approveAllWalkthrough(beta);
   await cleanUpWalkthrough({ acme, gamma, beta });
   await page.reload();
@@ -440,6 +485,7 @@ try {
   await drawer.getByText(/conversation, DAVE's tool results and any document DAVE reads/).waitFor();
   await shot(page, 'panel-idle-1440');
   await auditStage(page, 'idle drawer 1440');
+  await auditReflow(page, 'Focus beside the drawer 1440');
 
   // 4. Start: server mints the ephemeral secret, the SDP goes to the stub, session.update goes out on open.
   const started = page.waitForResponse(r => r.url() === `${BASE}/api/voice/sessions` && r.request().method() === 'POST');

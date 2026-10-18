@@ -42,9 +42,6 @@ export type VoiceContextValue = {
   sendText: (text: string, options?: { fromUser?: boolean }) => void;
   approval: { on: boolean; via: ApprovalVia | null };
   setApproval: (on: boolean) => void;
-  /** Idle toggle: turn Approve all on right after the next session starts (a human click). */
-  approveOnStart: boolean;
-  setApproveOnStart: (on: boolean) => void;
   undoCleanUp: (cardId: string) => void;
   shareFiles: (files: readonly File[]) => void;
   answerConfirm: (cardId: string, accept: boolean) => void;
@@ -113,10 +110,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<VoiceMode>("hands_free");
   const [levels, setLevels] = useState<DaveLevels>(ZERO_LEVELS);
   const [approval, setApprovalState] = useState<{ on: boolean; via: ApprovalVia | null }>({ on: false, via: null });
-  const [approveOnStart, setApproveOnStart] = useState(false);
   const [approvalSaid, setApprovalSaid] = useState("");
-  const approveOnStartRef = useRef(false);
-  approveOnStartRef.current = approveOnStart;
   // The provider sits above the routed workspace, so it follows the hash itself for the "Looking at" chip.
   const [hash, setHash] = useState(() => typeof window === "undefined" ? "" : window.location.hash);
   const live = useRef<Live | null>(null);
@@ -260,7 +254,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             onReady: () => {
               if (live.current !== current) return;
               dispatch({ type: "ready" }); lastSpeech.current = Date.now(); playChime("start", sounds());
-              if (approveOnStartRef.current) applyApproval(current, true);
             },
             onFunctionCall: call => { if (live.current === current) runTool(current, call.callId, call.name, call.args); },
             onCaption: (role, text) => setCaption(c => ({ ...c, [role]: text })),
@@ -523,8 +516,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<VoiceContextValue>(() => ({
     state, entries, caption, status, settings: status?.settings ?? null, mode, muted, holding, error, chips: focusChips(focus), lookingAt, levels, open,
     openPanel, closePanel, start, end, toggleMute, pushToTalk, sendText, shareFiles, answerConfirm, copyCard, askAbout, saveSettings,
-    approval, setApproval, approveOnStart, setApproveOnStart, undoCleanUp,
-  }), [state, entries, caption, status, mode, muted, holding, error, focus, lookingAt, levels, open, openPanel, closePanel, start, end, toggleMute, pushToTalk, sendText, shareFiles, answerConfirm, copyCard, askAbout, saveSettings, approval, setApproval, approveOnStart, undoCleanUp]);
+    approval, setApproval, undoCleanUp,
+  }), [state, entries, caption, status, mode, muted, holding, error, focus, lookingAt, levels, open, openPanel, closePanel, start, end, toggleMute, pushToTalk, sendText, shareFiles, answerConfirm, copyCard, askAbout, saveSettings, approval, setApproval, undoCleanUp]);
 
   const announcement = phaseAnnouncement(state.phase === "live" ? { phase: "live", flags: { userSpeaking: false, modelSpeaking: false, responseActive: false, tools: 0 } } : state);
   return <VoiceContext.Provider value={value}>

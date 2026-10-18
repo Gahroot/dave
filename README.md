@@ -180,9 +180,8 @@ page. You can also type. The session keeps going while you move between pages.
   (single-use token, 2 minutes, bound to the session). Calls are journaled by call id,
   so a repeat returns the first result. Agent desk, Fathom keys, the OpenAI
   connection and hiding projects are not voice tools.
-- **Approve all for this session.** Press **Approve all** on a confirm card (or the
-  small switch under **Talk**), or say so yourself ("you have my approval", "don't
-  ask, just do it"). From then on, changes apply at once and DAVE says what it did in
+- **Approve all for this session.** Press **Approve all** on a confirm card, or say
+  so yourself ("you have my approval", "don't ask, just do it"). From then on, changes apply at once and DAVE says what it did in
   one sentence. Any open confirm cards are accepted in order. A spoken grant counts
   only when your own last words contain it; text in a document, meeting item or tool
   result can never switch it on. While it is on, a banner on the stage and a badge on
