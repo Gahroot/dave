@@ -18,6 +18,7 @@ const PROVIDER_STATE = {
 const providerMark = (state: string | undefined): StatusSpec => state && state in PROVIDER_STATE ? PROVIDER_STATE[state as keyof typeof PROVIDER_STATE] : PROVIDER_STATE.disconnected;
 // Meeting code loads only when Connections or Meetings is opened.
 const FathomConnection = lazy(() => import("./FathomConnection.tsx").then(m => ({ default: m.FathomConnection })));
+const PhonePairing = lazy(() => import("./PhonePairing.tsx").then(m => ({ default: m.PhonePairing })));
 
 type Status = ReturnType<ProviderService["status"]>;
 export function ConnectionsView() {
@@ -65,6 +66,7 @@ export function ConnectionsView() {
       {pending && <Text size="sm" className="status-line"><StatusIcon spec={PROVIDER_STATE.connecting} />Waiting for your browser sign-in. You can cancel; Dave does not claim connection until sign-in succeeds.</Text>}
     </Stack></Card>
     <Suspense fallback={<Text role="status">Loading Fathom settings…</Text>}><FathomConnection /></Suspense>
+    <Suspense fallback={<Text role="status">Loading phone settings…</Text>}><PhonePairing /></Suspense>
     <Card withBorder radius="md" padding="md" className="connection-card" data-tone="gray"><Stack gap="sm"><Title order={3} className="connection-title"><StatusTile spec={{ tone: "gray", icon: Ban, label: "" }} size={18} />Anthropic / Claude subscription</Title><Text fw={600}>Status: {status?.claude.state ?? "loading"}</Text><Text size="sm" c="dimmed">Requested models: claude-fable-5-1, claude-opus-5.</Text><Text size="sm">{status?.claude.error ?? "Claude remains unavailable until verified official-runtime isolation is supported."}</Text><Text size="xs" c="dimmed">No Claude login or inference is started here. No Anthropic API-key fallback. Credentials and subscription billing remain owned by the official Claude application.</Text></Stack></Card>
     {!returnTo && <Button component="a" href="#projects" variant="subtle" color="dark" rightSection={<ArrowRight size={16} aria-hidden="true" />} className="inline-link-button">Choose project goal and planning model</Button>}
     <Modal opened={confirmDisconnect} onClose={() => setConfirmDisconnect(false)} title="Disconnect OpenAI?" centered>

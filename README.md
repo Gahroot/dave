@@ -22,6 +22,17 @@ Fixtures must also pass an isolated home to `sourcePaths(home, appHome)`.
 For hot-reloading development, run `npm run server` and `npm run dev` separately.
 The server alone serves the last built UI; Vite proxies API requests to port 4317.
 
+## Desktop and phone apps
+
+- **macOS app** (Tauri): `npm run desktop:build` produces `DAVE.app` and a
+  `.dmg` with Node and the server bundled; no Node install needed. Quitting the
+  app stops its server. See [docs/desktop.md](docs/desktop.md).
+- **iPhone / Android app** (Expo, `mobile/`): native screens for every
+  workbench area. It pairs by scanning the QR code in **Connections → Phone**
+  and talks to your Mac over an opt-in, end-to-end encrypted LAN listener that
+  admits one phone. See [mobile/README.md](mobile/README.md) and
+  [docs/mobile-pairing.md](docs/mobile-pairing.md).
+
 ## Read-only discovery and opt-in execution
 
 - **Discovery is still read-only.** Portfolio scans, summaries and manual handoffs

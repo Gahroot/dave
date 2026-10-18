@@ -16,3 +16,9 @@ coverage/
 *.db
 *.db-wal
 *.db-shm
+
+# Tauri desktop
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/resources/server/
+src-tauri/gen/

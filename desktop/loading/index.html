@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src ipc: http://ipc.localhost">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DAVE</title>
+<style>
+  :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0f1115; color: #e6e8ee; }
+  main { width: min(720px, 90vw); text-align: center; }
+  .logo { width: 72px; height: 72px; border-radius: 18px; margin: 0 auto 20px; display: grid; place-items: center;
+          background: linear-gradient(135deg, #4f6bff, #7b4dff); font-size: 40px; font-weight: 700; color: #fff; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+  p { color: #9aa3b2; margin: 6px 0; }
+  .spinner { width: 22px; height: 22px; margin: 18px auto; border: 3px solid #2a2f3a; border-top-color: #6b7cff;
+             border-radius: 50%; animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  pre { text-align: left; background: #171a21; border: 1px solid #2a2f3a; border-radius: 8px; padding: 12px;
+        max-height: 40vh; overflow: auto; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+  button { margin-top: 14px; padding: 8px 20px; border-radius: 8px; border: 0; background: #4f6bff; color: #fff;
+           font-size: 14px; cursor: pointer; }
+  [hidden] { display: none !important; }
+  code { color: #c7cdd9; }
+</style>
+</head>
+<body>
+<main>
+  <div class="logo">D</div>
+  <section id="loading">
+    <h1>Starting DAVE…</h1>
+    <div class="spinner"></div>
+    <p id="detail">Launching the local server</p>
+  </section>
+  <section id="error" hidden>
+    <h1 id="err-title">DAVE could not start</h1>
+    <p id="err-message"></p>
+    <pre id="err-log"></pre>
+    <p>Full log: <code id="err-path"></code></p>
+    <button id="retry" type="button">Retry</button>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const ipc = window.__TAURI_INTERNALS__;
+  let busy = false;
+  async function poll() {
+    if (!ipc) { $("detail").textContent = "Desktop bridge unavailable."; return; }
+    try {
+      const s = await ipc.invoke("status");
+      if (s.phase === "failed") {
+        $("loading").hidden = true; $("error").hidden = false;
+        $("err-title").textContent = s.crashed ? "The DAVE server stopped" : "DAVE could not start";
+        $("err-message").textContent = s.message;
+        $("err-log").textContent = s.logTail || "(no output)";
+        $("err-path").textContent = s.logPath;
+        $("retry").textContent = s.crashed ? "Restart" : "Retry";
+        busy = false;
+      } else {
+        $("error").hidden = true; $("loading").hidden = false;
+        $("detail").textContent = s.port ? `Waiting for the server on 127.0.0.1:${s.port}` : "Launching the local server";
+      }
+    } catch (e) { $("detail").textContent = String(e); }
+    setTimeout(poll, 400);
+  }
+  $("retry").addEventListener("click", async () => {
+    if (busy) return; busy = true;
+    $("error").hidden = true; $("loading").hidden = false;
+    try { await ipc.invoke("retry"); } catch (e) { busy = false; }
+  });
+  poll();
+</script>
+</body>
+</html>
