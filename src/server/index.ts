@@ -20,10 +20,18 @@ import { intelService } from "../intel/service.ts";
 import { registerIntelRoutes } from "./intel-routes.ts";
 import { registerMeetingRoutes } from "./meeting-routes.ts";
 import { localBrowserOrigins, registerRequestGuard } from "./request-guard.ts";
+import { createDocumentService } from "../documents/service.ts";
+import type { TextExtractor } from "../documents/types.ts";
+import { registerDocumentRoutes } from "./document-routes.ts";
+import { createVoiceService } from "../voice/service.ts";
+import { registerVoiceRoutes } from "./voice-routes.ts";
+import { createTriageService } from "../triage/service.ts";
+import { registerTriageRoutes } from "./triage-routes.ts";
 
 const DIST = fileURLToPath(new URL("../../dist", import.meta.url));
 
-export async function buildServer(paths = sourcePaths(), options: { browserOrigins?: string[]; providers?: ProviderService; agentOptions?: AgentOptions; meetings?: MeetingServiceOptions; startMeetingScheduler?: boolean; startIntelScheduler?: boolean } = {}) {
+export async function buildServer(paths = sourcePaths(), options: { browserOrigins?: string[]; providers?: ProviderService; agentOptions?: AgentOptions; meetings?: MeetingServiceOptions; startMeetingScheduler?: boolean; startIntelScheduler?: boolean;
+  voice?: { fetch?: typeof fetch; now?: () => Date }; documents?: { extractor?: TextExtractor } } = {}) {
   const app = Fastify({ logger: false });
   registerRequestGuard(app, options.browserOrigins ?? localBrowserOrigins(Number(process.env.PORT ?? 4317)));
   const db = openDb(paths.appHome);
@@ -37,7 +45,8 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
   catch(e) { await app.close(); throw e; }
   const repo = makeRepo(db);
   // Delivery Intelligence: deterministic reconcile + prioritiser. Reads only; never launches agents.
-  const intel = intelService(db, { latest: () => repo.latest() });
+  // Rejecting a "Confirm commitment" decision also drops its still-open meeting promise (called at runtime only).
+  const intel = intelService(db, { latest: () => repo.latest(), onCommitmentRejected: (ids) => dropRejectedPromises(ids) });
   app.addHook("onClose", async () => { intel.close(); });
   // Meeting promises and client ideas join the Inbox inside refresh's own save
   // step, and again whenever meetings change between refreshes.
@@ -48,7 +57,17 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
     const latest = repo.latest();
     if (latest) applyMeetingAttention(meetingItems, reconcile, [...latest.active, ...latest.other], now);
   };
-  registerRoutes(app, paths, repo, {
+  function dropRejectedPromises(ids: string[]): void {
+    const at = new Date();
+    let changed = false;
+    for (const id of [...ids].sort()) {
+      const item = meetingItems.item(id);
+      if (!item || (item.status !== "open" && item.status !== "looks_done") || item.statusSource === "user") continue;
+      changed = meetingItems.setItemStatus(id, { status: "dropped", source: "user", note: "Rejected in Decisions" }, at.toISOString()) || changed;
+    }
+    if (changed) rebuildMeetingAttention(at);
+  }
+  const portfolio = registerRoutes(app, paths, repo, {
     hooks: { attention: (visible, now) => applyMeetingAttention(meetingItems, reconcile, visible, now) },
     onAttentionAction: (id, action, now) => { if (applyInboxAction(meetingItems, id, action, now)) rebuildMeetingAttention(now); },
   });
@@ -69,6 +88,53 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
   app.addHook("onClose", async () => { await meetings.close(); });
   registerMeetingRoutes(app, meetings);
   registerIntelRoutes(app, intel);
+  // Talk to DAVE. Registered last so it closes first (voice, then documents, then the hooks above).
+  // Nothing here touches the network or the Keychain until the user starts a voice session.
+  const visibleProjects = () => {
+    const latest = repo.latest();
+    const seen = new Map<string, string>();
+    const hidden = new Set(latest ? latest.hidden.map((p) => p.id) : []);
+    if (latest) for (const p of [...latest.active, ...latest.other]) if (!p.override.hidden) seen.set(p.id, p.name);
+    for (const p of repo.projects()) if (!hidden.has(p.id) && !seen.has(p.id)) seen.set(p.id, p.name);
+    try { for (const r of intel.focus().projects) if (!seen.has(r.projectId)) seen.set(r.projectId, r.projectName); } catch { /* intel unavailable */ }
+    return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  };
+  const projectNameOf = (id: string): string | null => {
+    const latest = repo.latest();
+    const hit = latest ? [...latest.active, ...latest.other, ...latest.hidden].find((p) => p.id === id) : undefined;
+    return hit?.name ?? (intel.knownProject(id) ? (repo.projects().find((p) => p.id === id)?.name ?? null) : null);
+  };
+  // Clean up: bulk clear / mark done with undo. `triage` is the service a voice worker can hand to createVoiceService.
+  const triage = createTriageService({
+    db, now: () => new Date(), projectName: projectNameOf,
+    onChanged: () => {
+      rebuildMeetingAttention();
+      try { intel.reconcileSync(); } catch { /* intelligence must never break clean-up */ }
+    },
+  });
+  registerTriageRoutes(app, triage);
+  const documents = createDocumentService(db, paths.appHome, {
+    ...(options.documents?.extractor ? { extractor: options.documents.extractor } : {}),
+    projectName: projectNameOf,
+    knownProject: (id) => intel.knownProject(id),
+  });
+  app.addHook("onClose", async () => { await documents.close(); });
+  registerDocumentRoutes(app, documents);
+  const voice = createVoiceService({
+    db, providers, intel, documents, portfolio,
+    meetings: {
+      items: (filter) => meetings.items(filter),
+      setItemStatus: (id, action) => meetings.setItemStatus(id, action),
+      syncNow: () => meetings.syncNow(),
+      fathomConnected: () => !!meetingItems.settings().connectedAt,
+    },
+    projects: visibleProjects,
+    triage,
+    ...(options.voice?.fetch ? { fetch: options.voice.fetch } : {}),
+    ...(options.voice?.now ? { now: options.voice.now } : {}),
+  });
+  app.addHook("onClose", async () => { voice.close(); });
+  registerVoiceRoutes(app, voice);
   // Only the real server entry point polls Fathom; tests never start the timer.
   if (options.startMeetingScheduler) meetings.startScheduler();
   if (options.startIntelScheduler) intel.startScheduler();

@@ -1,4 +1,4 @@
-import type { FocusState, ItemKind, Owner, ProjectIntel, DeliveryStage, EvidenceState, ItemStatus, Lane, MarkableStep, ReadinessLevel } from "../intel/types.ts";
+import type { DirectionNote, DirectionPatch, FocusState, ItemKind, Owner, ProjectIntel, DeliveryStage, EvidenceState, ItemStatus, Lane, MarkableStep, ReadinessLevel } from "../intel/types.ts";
 
 export class IntelRequestError extends Error {
   status: number;
@@ -43,6 +43,8 @@ export type ScheduleInput = { targetDate: string | null; startDate?: string | nu
 export type FinishLineItemInput = { title: string; detail?: string | null; acceptance?: string[]; goal?: string | null };
 export type FinishLineResult = { added: number; skipped: number; intel: ProjectIntel };
 
+export type NoteResult = { note: DirectionNote; intel: ProjectIntel };
+
 export const intelApi = {
   focus: (signal?: AbortSignal) => call<FocusState>("GET", "/api/intel/focus", undefined, signal),
   project: (id: string, signal?: AbortSignal) => call<ProjectIntel>("GET", `/api/intel/projects/${enc(id)}`, undefined, signal),
@@ -60,4 +62,7 @@ export const intelApi = {
     call<FinishLineResult>("POST", `/api/intel/projects/${enc(id)}/finish-line`, acceptance?.length ? { items, acceptance } : { items }),
   verifyItem: (itemId: string) => call<ProjectIntel>("POST", `/api/intel/items/${enc(itemId)}/verify`, {}),
   reopenItem: (itemId: string, note?: string) => call<ProjectIntel>("POST", `/api/intel/items/${enc(itemId)}/reopen`, note ? { note } : {}),
+  setDirection: (id: string, patch: DirectionPatch) => call<ProjectIntel>("PUT", `/api/intel/projects/${enc(id)}/direction`, patch),
+  addNote: (id: string, text: string) => call<NoteResult>("POST", `/api/intel/projects/${enc(id)}/notes`, { text }),
+  deleteNote: (noteId: string) => call<{ ok: true }>("POST", `/api/intel/notes/${enc(noteId)}/delete`, {}),
 };

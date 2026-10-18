@@ -1,0 +1,39 @@
+.dave-mascot {
+  display: inline-block;
+  position: relative;
+  flex: none;
+  line-height: 0;
+  border-radius: 28%;
+}
+.dave-mascot__canvas { display: block; }
+.dave-mascot--button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.dave-mascot--button:focus-visible { outline: 2px solid #9d8cff; outline-offset: 3px; }
+
+.dave-led { display: inline-block; line-height: 0; vertical-align: middle; color: #9d8cff; }
+.dave-led--dim { color: #8a80b8; }
+.dave-led--oops { color: #ff6b60; }
+.dave-led__dots { display: block; overflow: visible; filter: drop-shadow(0 0 2px color-mix(in srgb, currentColor 70%, transparent)); }
+.dave-led__dots circle { fill: currentColor; }
+
+.dave-gallery { display: flex; flex-wrap: wrap; gap: 12px; list-style: none; margin: 0; padding: 0; }
+.dave-gallery__tile { display: grid; justify-items: center; gap: 6px; padding: 10px 10px 8px; border-radius: 14px; background: #0a0a0c; border: 1px solid #24202f; }
+.dave-gallery__caption { font-size: 12px; color: #d6ceff; text-transform: capitalize; }
+
+@media (forced-colors: active) {
+  .dave-led, .dave-led--dim, .dave-led--oops { color: CanvasText; }
+  .dave-led__dots { filter: none; }
+  .dave-led__dots circle { fill: CanvasText; }
+  .dave-gallery__tile { background: Canvas; border-color: CanvasText; }
+  .dave-gallery__caption { color: CanvasText; }
+  .dave-mascot--button:focus-visible { outline-color: Highlight; }
+}
+/* Drag-to-spin: keep vertical page scroll on touch, take horizontal drags. */
+.dave-mascot { touch-action: pan-y; }

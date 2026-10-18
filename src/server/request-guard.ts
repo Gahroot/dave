@@ -2,6 +2,15 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 export const GUARDED_BODY_LIMIT = 64 * 1024;
+/** Only routes registered with `config: { upload: true }` may receive raw bytes, and never more than this. */
+export const UPLOAD_BODY_LIMIT = 25 * 1024 * 1024;
+export type RequestGuardOptions = {
+  /** Lowers (never raises) the upload ceiling, e.g. for tests. */
+  uploadBodyLimit?: number;
+};
+function uploadRoute(config: unknown): boolean {
+  return typeof config === "object" && config !== null && (config as { upload?: unknown }).upload === true;
+}
 export const CSRF_HEADER = "x-dave-csrf";
 export const CSRF_PATH = "/api/security/csrf";
 
@@ -18,7 +27,8 @@ function validOrigin(value: string): boolean {
 }
 function guardedRoute(url: string): boolean {
   return url === CSRF_PATH || /^\/api\/agents(?:\/|$)/.test(url) || /^\/api\/delivery(?:\/|$)/.test(url) || /^\/api\/providers(?:\/|$)/.test(url) ||
-    /^\/api\/meetings(?:\/|$)/.test(url) || /^\/api\/intel(?:\/|$)/.test(url) || /^\/api\/projects\/[^/]+\/delivery(?:\/|$)/.test(url);
+    /^\/api\/meetings(?:\/|$)/.test(url) || /^\/api\/intel(?:\/|$)/.test(url) || /^\/api\/projects\/[^/]+\/delivery(?:\/|$)/.test(url) ||
+    /^\/api\/voice(?:\/|$)/.test(url) || /^\/api\/files(?:\/|$)/.test(url) || /^\/api\/triage(?:\/|$)/.test(url);
 }
 function fail(reply: FastifyReply, status: number, error: string) {
   return reply.code(status).send({ error });
@@ -38,7 +48,9 @@ function singleHeader(req: FastifyRequest, name: string): string | undefined {
  * plugins and routes declared after registration. Tokens are per server/origin,
  * never persisted, logged, or shared with a provider. Restart requires refetch.
  */
-export function registerRequestGuard(app: FastifyInstance, origins: string[]): void {
+export function registerRequestGuard(app: FastifyInstance, origins: string[], options: RequestGuardOptions = {}): void {
+  const uploadLimit = Math.min(options.uploadBodyLimit ?? UPLOAD_BODY_LIMIT, UPLOAD_BODY_LIMIT);
+  if (!Number.isInteger(uploadLimit) || uploadLimit < 1) throw new Error("Invalid upload body limit");
   if (origins.length === 0 || origins.length > 12 || !origins.every(validOrigin)) {
     throw new Error("Configure explicit HTTP loopback browser origins");
   }
@@ -46,7 +58,7 @@ export function registerRequestGuard(app: FastifyInstance, origins: string[]): v
   const hosts = new Map([...tokens.keys()].map((origin) => [new URL(origin).host, origin]));
   const requestOrigin = (req: FastifyRequest) => hosts.get(singleHeader(req, "host") ?? "");
 
-  const guard = async (req: FastifyRequest, reply: FastifyReply) => {
+  const guardFor = (upload: boolean) => async (req: FastifyRequest, reply: FastifyReply) => {
     reply.header("Cache-Control", "no-store");
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Cross-Origin-Resource-Policy", "same-origin");
@@ -74,20 +86,41 @@ export function registerRequestGuard(app: FastifyInstance, origins: string[]): v
       return fail(reply, 403, "Missing or invalid CSRF token");
     }
     const contentType = singleHeader(req, "content-type") ?? "";
-    if (!/^application\/json(?:\s*;\s*charset=(?:utf-8|"utf-8"))?$/i.test(contentType) ||
-        (req.headers["content-encoding"] !== undefined && singleHeader(req, "content-encoding") !== "identity")) {
+    const encoded = req.headers["content-encoding"] !== undefined && singleHeader(req, "content-encoding") !== "identity";
+    if (upload) {
+      if (!/^application\/octet-stream$/i.test(contentType) || encoded) {
+        return fail(reply, 415, "An uncompressed application/octet-stream body is required");
+      }
+      return;
+    }
+    if (!/^application\/json(?:\s*;\s*charset=(?:utf-8|"utf-8"))?$/i.test(contentType) || encoded) {
       return fail(reply, 415, "An uncompressed application/json body is required");
     }
   };
+  // Raw bytes are parsed only for upload routes; the guard has already rejected octet-stream elsewhere,
+  // and unguarded routes get a 415 here. The route bodyLimit (set below) governs upload routes.
+  app.addContentTypeParser("application/octet-stream", { parseAs: "buffer", bodyLimit: GUARDED_BODY_LIMIT }, (req, body, done) => {
+    if (!guardedRoute(req.routeOptions.url ?? "") || !uploadRoute(req.routeOptions.config)) {
+      done(Object.assign(new Error("Unsupported media type"), { statusCode: 415 }), undefined);
+      return;
+    }
+    done(null, body);
+  });
   app.addHook("onRoute", (route) => {
     if (!guardedRoute(route.url)) return;
-    // Route-local smaller limits remain valid; no route can raise this ceiling.
-    route.bodyLimit = Math.min(route.bodyLimit ?? GUARDED_BODY_LIMIT, GUARDED_BODY_LIMIT);
+    const upload = uploadRoute(route.config);
+    // Route-local smaller limits remain valid; no route can raise its ceiling.
+    const ceiling = upload ? uploadLimit : GUARDED_BODY_LIMIT;
+    route.bodyLimit = Math.min(route.bodyLimit ?? ceiling, ceiling);
     const existing = route.onRequest ? (Array.isArray(route.onRequest) ? route.onRequest : [route.onRequest]) : [];
-    route.onRequest = [guard, ...existing];
+    route.onRequest = [guardFor(upload), ...existing];
     const validation = route.preValidation ? (Array.isArray(route.preValidation) ? route.preValidation : [route.preValidation]) : [];
     route.preValidation = [async (req, reply) => {
       if (req.method === "GET" || req.method === "HEAD") return;
+      if (upload) {
+        if (!Buffer.isBuffer(req.body)) return fail(reply, 400, "A file body is required");
+        return;
+      }
       if (req.body === null || typeof req.body !== "object" || Array.isArray(req.body)) {
         return fail(reply, 400, "A JSON object is required");
       }
@@ -101,6 +134,7 @@ export function registerRequestGuard(app: FastifyInstance, origins: string[]): v
         404: "Not found", 409: "State changed; reload and retry", 413: "Request body is too large",
         415: "An uncompressed application/json body is required", 429: "Too many requests", 503: "Service unavailable",
       };
+      if (upload) { messages[413] = "File is too large"; messages[415] = "Unsupported file type"; }
       return fail(reply, status && messages[status] ? status : 500, status && messages[status] ? messages[status]! : "Request failed");
     };
   });

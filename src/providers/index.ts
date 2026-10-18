@@ -40,6 +40,12 @@ export function createProviderService(deps: { authFactory?: (mode: OpenAIStorage
       });
       return { ...current };
     },
+    /** Voice only, on an explicit start: reads the Keychain ChatGPT credentials (refreshing when needed).
+     * Never an API key and never ~/.codex/auth.json. OpenAIAuthError propagates for the caller to map. */
+    async realtimeAccess(): Promise<{ accessToken: string; accountId: string }> {
+      const credentials = await owner().getCredentials();
+      return { accessToken: credentials.accessToken, accountId: credentials.accountId };
+    },
     restore(storage: OpenAIStorageMode) { select(storage); owner().restore(); },
     cancel(id: string) { if (operation?.id !== id) return false; if (operation.status === "pending") { operation.status = "cancelled"; auth?.cancel(); } return true; },
     disconnect() { if (operation?.status === "pending") { operation.status = "cancelled"; auth?.cancel(); } owner().disconnect(); },

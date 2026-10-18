@@ -174,6 +174,48 @@ describe("intel routes", () => {
       ["POST", "/api/intel/projects/p1/finish-line", { items: [{ title: "x" }] }],
       ["POST", `/api/intel/items/${ID}/verify`, {}],
       ["POST", `/api/intel/items/${ID}/reopen`, {}],
+      ["PUT", "/api/intel/projects/p1/direction", { priority: 1 }],
+      ["POST", "/api/intel/projects/p1/notes", { text: "x" }],
+      ["POST", `/api/intel/notes/${ID}/delete`, {}],
     ] as const) expect((await noToken(method, url, payload)).statusCode, url).toBe(403);
+  });
+
+  it("sets direction and manages notes", async () => {
+    const f = await fixture();
+    const raw = new DatabaseSync(`${f.home}/pcc.db`);
+    raw.exec("INSERT INTO projects VALUES('p1','/w/acme','Acme','2026-01-01','2026-01-01')");
+    raw.exec("INSERT INTO projects VALUES('p2','/w/beta','Beta','2026-01-01','2026-01-01')");
+    raw.close();
+    const dir = (id: string, payload: object) => f.send("PUT", `/api/intel/projects/${id}/direction`, payload);
+    expect((await dir("p1", {})).statusCode).toBe(400);
+    expect((await dir("p1", { priority: 0 })).statusCode).toBe(400);
+    expect((await dir("p1", { priority: 6 })).statusCode).toBe(400);
+    expect((await dir("p1", { priority: 1.5 })).statusCode).toBe(400);
+    expect((await dir("p1", { priority: "1" })).statusCode).toBe(400);
+    expect((await dir("p1", { bogus: 1 })).statusCode).toBe(400);
+    expect((await dir("p1", { focusItemIds: ["nothex"] })).statusCode).toBe(400);
+    expect((await dir("p1", { paidWhen: "x".repeat(501) })).statusCode).toBe(400);
+    expect((await dir("nope", { priority: 1 })).statusCode).toBe(404);
+    const other = (await f.send("POST", "/api/intel/projects/p2/items", { kind: "requirement", title: "Beta thing" })).json().items[0].id as string;
+    expect((await dir("p1", { focusItemIds: [other] })).statusCode).toBe(400);
+    const ok = await dir("p1", { priority: 2, paidWhen: "  Client signs off  " });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().direction).toMatchObject({ priority: 2, paidWhen: "Client signs off", focusItemIds: [] });
+    expect((await dir("p1", { paidWhen: "" })).json().direction.paidWhen).toBeNull();
+
+    expect((await f.send("POST", "/api/intel/projects/p1/notes", { text: "  " })).statusCode).toBe(400);
+    expect((await f.send("POST", "/api/intel/projects/p1/notes", { text: "x".repeat(501) })).statusCode).toBe(400);
+    expect((await f.send("POST", "/api/intel/projects/p1/notes", { text: "x", extra: 1 })).statusCode).toBe(400);
+    expect((await f.send("POST", "/api/intel/projects/nope/notes", { text: "x" })).statusCode).toBe(404);
+    const note = await f.send("POST", "/api/intel/projects/p1/notes", { text: "Booking flow first" });
+    expect(note.statusCode).toBe(200);
+    const body = note.json() as { note: { id: string; source: string }; intel: { direction: { notes: { id: string }[] } } };
+    expect(body.note).toMatchObject({ source: "ui" });
+    expect(body.intel.direction.notes.map((n) => n.id)).toEqual([body.note.id]);
+    expect((await f.send("POST", "/api/intel/notes/zz/delete", {})).statusCode).toBe(400);
+    expect((await f.send("POST", `/api/intel/notes/${ID}/delete`, {})).statusCode).toBe(404);
+    expect((await f.send("POST", `/api/intel/notes/${body.note.id}/delete`, { x: 1 })).statusCode).toBe(400);
+    expect((await f.send("POST", `/api/intel/notes/${body.note.id}/delete`, {})).json()).toEqual({ ok: true });
+    expect((await f.get("/api/intel/projects/p1")).json().direction.notes).toEqual([]);
   });
 });

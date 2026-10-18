@@ -157,3 +157,58 @@ describe("outcome drafting", () => {
     expect(pending("outcome_draft")).toHaveLength(1);
   });
 });
+
+describe("reconcile: meeting items you closed yourself", () => {
+  const commitment = () => h.intel.store.items("p1").find((i) => i.kind === "commitment")!;
+  const close = (id: string, status: string, source: string) =>
+    h.db.prepare("UPDATE meeting_items SET status=?, status_source=? WHERE id=?").run(status, source, id);
+
+  it("applies directly to an inferred, unlocked item and drafts no decision", async () => {
+    h = intelHarness();
+    h.addItem({ id: "m1", recordingId: "100", text: "Send the invoice export to Acme", due: "2026-10-15" });
+    await h.intel.reconcile();
+    expect(pending("new_commitment")).toHaveLength(1);
+    close("m1", "dropped", "user");
+    await h.intel.reconcile();
+    const item = commitment();
+    expect(item.status).toBe("obsolete");
+    expect(item.provenance.some((p) => p.sourceKind === "human" && p.label === "Closed by you in Meetings" && p.quote === null)).toBe(true);
+    expect(pending().filter((p) => p.itemId === item.id)).toHaveLength(0);
+    expect(h.intel.store.proposals("p1").some((p) => p.kind === "mark_obsolete")).toBe(false);
+    const rejected = h.intel.store.proposals("p1").find((p) => p.kind === "new_commitment");
+    expect(rejected?.status).toBe("rejected");
+    expect(h.intel.store.changes("p1").some((c) => c.summary.includes("closed by you in meetings"))).toBe(true);
+  });
+
+  it("a confirmed item still gets a proposal", async () => {
+    h = intelHarness();
+    h.addItem({ id: "m1", recordingId: "100", text: "Send the invoice export to Acme" });
+    await h.intel.reconcile();
+    h.intel.patchItem(commitment().id, { confirm: true });
+    close("m1", "done", "user");
+    await h.intel.reconcile();
+    expect(commitment().status).toBe("open");
+    expect(pending("mark_complete")).toHaveLength(1);
+  });
+
+  it("a model-closed item still gets a proposal", async () => {
+    h = intelHarness();
+    h.addItem({ id: "m1", recordingId: "100", text: "Send the invoice export to Acme" });
+    await h.intel.reconcile();
+    close("m1", "dropped", "model");
+    await h.intel.reconcile();
+    expect(commitment().status).toBe("open");
+    expect(pending("mark_obsolete")).toHaveLength(1);
+  });
+
+  it("an item still backed by an open meeting item gets a proposal", async () => {
+    h = intelHarness();
+    h.addItem({ id: "m1", recordingId: "100", text: "Send the invoice export to Acme" });
+    h.addItem({ id: "m2", recordingId: "101", text: "Send invoice export to Acme!" });
+    await h.intel.reconcile();
+    close("m1", "dropped", "user");
+    await h.intel.reconcile();
+    expect(commitment().status).toBe("open");
+    expect(pending("mark_obsolete")).toHaveLength(1);
+  });
+});

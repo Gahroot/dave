@@ -1,13 +1,16 @@
-export type Destination = "focus" | "queue" | "projects" | "agents" | "meetings" | "connections" | "issues";
+import { TRIAGE_BUCKETS, type TriageBucket } from "../triage/types.ts";
+
+export type Destination = "focus" | "queue" | "projects" | "agents" | "meetings" | "cleanup" | "connections" | "issues" | "voice";
 export type MeetingSection = "promises" | "asks" | "list" | "instructions";
 export type ProjectTab = "overview" | "delivery" | "context";
 export type InboxFilter = "all" | "decision" | "ready" | "waiting";
 export type RunFilter = "all" | "attention" | "active" | "queued" | "finished";
-const destinations = new Set<string>(["focus", "queue", "projects", "agents", "meetings", "connections", "issues"]);
+const destinations = new Set<string>(["focus", "queue", "projects", "agents", "meetings", "cleanup", "connections", "issues", "voice"]);
 /** Fathom recording ids are digits only. */
 const recordingId = (value: string | null): string | null => value && /^\d{1,20}$/.test(value) ? value : null;
 const identifier = (value: string | null): string | null => value && /^[a-zA-Z0-9_-]{1,200}$/.test(value) ? value : null;
 const oneOf = <T extends string>(value: string | null, allowed: readonly T[], fallback: T): T => allowed.includes(value as T) ? value as T : fallback;
+const bucketOf = (value: string | null): TriageBucket | null => TRIAGE_BUCKETS.find((b) => b === value) ?? null;
 /** Meeting item ids are derived hashes; anything else is dropped. */
 const meetingItemId = (value: string | null): string | null => value && /^mi-[0-9a-f]{24}$/.test(value) ? value : null;
 
@@ -39,6 +42,8 @@ export function parseRoute(hash: string) {
     view: oneOf(query.get("view"), ["runs", "new", "settings"] as const, "runs"),
     project: identifier(query.get("project")), handoff: identifier(query.get("handoff")),
     meetingItem: meetingItemId(query.get("meetingItem")),
+    /** Clean up: which bucket to open (validated; unknown values are dropped). */
+    bucket: destination === "cleanup" ? bucketOf(query.get("bucket")) : null,
     returnTo: safeReturn(query.get("return")),
   };
 }
@@ -52,7 +57,7 @@ export function routeLink(destination: Destination, values: Record<string, strin
 
 /** No redirects to arbitrary URLs, nested returns, or private text. */
 export function safeReturn(value: string | null): string | null {
-  if (!value || value.length > 2000 || !/^#(focus|queue|projects|agents|meetings)(\?|\/|$)/.test(value)) return null;
+  if (!value || value.length > 2000 || !/^#(focus|queue|projects|agents|meetings|cleanup)(\?|\/|$)/.test(value)) return null;
   const [path = "", query = ""] = value.slice(1).split("?");
   const params = new URLSearchParams(query);
   params.delete("return");
@@ -67,5 +72,6 @@ function parseRouteWithoutReturn(path: string, params: URLSearchParams): string 
   if (route.destination === "projects") return routeLink("projects", { id: route.id, q: route.q, waiting: route.waiting, hidden: route.hidden, tab: route.tab });
   if (route.destination === "agents") return routeLink("agents", { view: route.view, project: route.project, handoff: route.handoff, meetingItem: route.meetingItem, filter: route.runFilter }, route.runId);
   if (route.destination === "meetings") return routeLink("meetings", { section: route.section === "promises" ? null : route.section, rec: route.rec });
+  if (route.destination === "cleanup") return routeLink("cleanup", { bucket: route.bucket });
   return null;
 }

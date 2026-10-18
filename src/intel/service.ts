@@ -6,8 +6,10 @@ import type { MeetingItem } from "../meetings/types.ts";
 import type {
   Basis, ChangeEntry, DeliveryPlan, EvidenceState, FocusState, Freshness, IntelItem, ItemKind, ItemStatus, Lane, MarkableStep, Objective, Owner,
   ProjectFocusRow, ProjectIntel, ProjectOutcome, Proposal, ReadinessLevel, SourceHealth, DeliveryStage,
+  DirectionApi, DirectionNote, DirectionPatch, ProjectDirection,
 } from "./types.ts";
-import { LANES, READINESS_LEVELS } from "./types.ts";
+import { DIRECTION_NOTE_MAX_CHARS, LANES, PRIORITY_MAX, PRIORITY_MIN, READINESS_LEVELS } from "./types.ts";
+import { directionStore } from "./direction-store.ts";
 import { intelStore, itemId, type IntelStore, type StoredOutcome } from "./store.ts";
 import { reconcileProject, type IntelModelHook, type ReconcileInput, type ReconcileReport } from "./reconcile.ts";
 import { deriveStage, projectOutcome, readinessWithSteps } from "./outcome.ts";
@@ -33,6 +35,8 @@ export type IntelServiceOptions = {
   /** Off by default. Core rules never need it; tests never provide one. */
   hook?: IntelModelHook;
   intervalMs?: number;
+  /** Called after rejecting a "Confirm commitment" decision, with its meeting item ids. Failures are ignored. */
+  onCommitmentRejected?: (meetingItemIds: string[]) => void;
 };
 
 export type ItemFields = Partial<{
@@ -43,6 +47,10 @@ export type ItemFields = Partial<{
 /** One finish-line item pulled from a pasted agreement, after you ticked it. */
 export type FinishLineInput = { title: string; detail?: string | null; acceptance?: string[]; goal?: string | null };
 export const MAX_ACCEPTANCE_CRITERIA = 20;
+/** "Matters most now" holds at most this many items. */
+export const MAX_FOCUS_ITEMS = 20;
+/** Notes returned with a project's direction (newest first). */
+const DIRECTION_NOTES_SHOWN = 200;
 
 export function intelService(db: Db, options: IntelServiceOptions) {
   const now = options.now ?? (() => new Date());
@@ -54,6 +62,7 @@ export function intelService(db: Db, options: IntelServiceOptions) {
   };
   const store: IntelStore = intelStore(db, projectName);
   const meetings = meetingStore(db);
+  const directions = directionStore(db);
   let timer: ReturnType<typeof setInterval> | null = null;
 
   function allProjects(): PortfolioProject[] { const l = options.latest(); return l ? [...l.active, ...l.other] : []; }
@@ -141,7 +150,22 @@ export function intelService(db: Db, options: IntelServiceOptions) {
       projectId, projectName: projectName(projectId), items,
       stage: outcome?.stageOverride ?? deriveStage(items, readiness, hasActivity), readiness, hasOutcome: !!outcome,
       outcomeDraftPending: store.proposals(projectId).some((x) => x.kind === "outcome_draft" && x.status === "pending"), uncertain,
+      ...directionInput(projectId, items),
     };
+  }
+
+  /** Focus ids that no longer exist (or moved project) are dropped at read time. */
+  function liveFocus(projectId: string, ids: string[], items: IntelItem[] = store.items(projectId)): string[] {
+    const known = new Set(items.map((i) => i.id));
+    return ids.filter((id) => known.has(id));
+  }
+  /** Only adds `direction` when something is set, so an unset direction ranks exactly as before. */
+  function directionInput(projectId: string, items: IntelItem[]): Pick<PrioritizeProject, "direction"> {
+    const d = directions.get(projectId);
+    if (!d) return {};
+    const focusItemIds = liveFocus(projectId, d.focusItemIds, items);
+    if (d.priority === null && !focusItemIds.length) return {};
+    return { direction: { priority: d.priority, focusItemIds } };
   }
 
   /** Everything the pure delivery core needs for one project. Meetings are optional: a failure means "never seen". */
@@ -214,6 +238,7 @@ export function intelService(db: Db, options: IntelServiceOptions) {
       const ms = items.filter((i) => i.kind === "milestone" && i.status !== "dropped" && i.status !== "obsolete");
       const next = items.filter((i) => i.kind === "commitment" && (i.status === "open" || i.status === "in_progress") && i.dueDate).sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "") || a.id.localeCompare(b.id))[0];
       const rec = store.reconciled(inp.projectId);
+      const dir = directions.get(inp.projectId);
       return {
         projectId: inp.projectId, projectName: inp.projectName, stage: inp.stage, outcome: outcome?.desiredOutcome ?? null, outcomeBasis: outcome?.basis ?? null,
         objective: byProject.get(inp.projectId)?.objective ?? null, readinessReached: top,
@@ -226,6 +251,7 @@ export function intelService(db: Db, options: IntelServiceOptions) {
         nextCommitment: next?.dueDate ? { title: next.title, dueDate: next.dueDate } : null,
         freshness: freshnessOf(inp.projectId, sources), lastReconciledAt: rec?.at ?? null,
         delivery: plan.progress, nextMove: nextMoveText(plan),
+        paidWhen: dir?.paidWhen ?? null, priority: dir?.priority ?? null,
       };
     }).filter((r) => r.objective || r.counts.requirements || r.counts.milestonesTotal || r.counts.pendingProposals || r.outcome || r.lastReconciledAt)
       .sort((a, b) => (queue.findIndex((o) => o.projectId === a.projectId) + 1 || 9999) - (queue.findIndex((o) => o.projectId === b.projectId) + 1 || 9999) || a.projectName.localeCompare(b.projectName) || a.projectId.localeCompare(b.projectId));
@@ -259,6 +285,7 @@ export function intelService(db: Db, options: IntelServiceOptions) {
       projectId: id, projectName: inp.projectName, outcome, items: inp.items, objective: objectives.objective, otherActions: objectives.others, plan,
       proposals: proposals.sort((a, b) => (a.status === "pending" ? 0 : 1) - (b.status === "pending" ? 0 : 1) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)),
       history: store.changes(id, 50), gaps: computeGaps(inp), freshness: freshnessOf(id, sources), lastReconciledAt: store.reconciled(id)?.at ?? null,
+      direction: readDirection(id, inp.items),
     };
   }
 
@@ -379,6 +406,10 @@ export function intelService(db: Db, options: IntelServiceOptions) {
       store.resolveProposal(id, accept ? "accepted" : "rejected", note, at);
       store.addChange({ projectId: p.projectId, kind: "proposal_resolved", summary: `${accept ? "Accepted" : "Rejected"}: ${p.summary}${note ? ` (${note})` : ""}`, itemId: p.itemId, sources: ["human"] }, at);
     });
+    if (!accept && p.kind === "new_commitment") {
+      const ids = p.provenance.filter((x) => x.sourceKind === "meeting" && x.sourceId !== null).map((x) => String(x.sourceId));
+      try { if (ids.length) options.onCommitmentRejected?.(ids); } catch { /* the reject already happened */ }
+    }
     refresh(p.projectId, `proposal ${accept ? "accepted" : "rejected"}`);
     return focus();
   }
@@ -534,6 +565,96 @@ export function intelService(db: Db, options: IntelServiceOptions) {
     return { added, skipped, intel: projectIntel(projectId) };
   }
 
+  // ---- direction: what you told DAVE ---------------------------------------------------------------------
+
+  function readDirection(projectId: string, items: IntelItem[] = store.items(projectId)): ProjectDirection {
+    const d = directions.get(projectId);
+    return {
+      projectId, paidWhen: d?.paidWhen ?? null, priority: d?.priority ?? null,
+      focusItemIds: d ? liveFocus(projectId, d.focusItemIds, items) : [],
+      notes: directions.notes(projectId, DIRECTION_NOTES_SHOWN), updatedAt: d?.updatedAt ?? null,
+    };
+  }
+  function direction(projectId: string): ProjectDirection {
+    if (!knownProject(projectId)) throw new IntelError("not-found", "Unknown project");
+    return readDirection(projectId);
+  }
+  const short = (s: string, n = 120): string => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+
+  function setDirection(projectId: string, patch: DirectionPatch): ProjectIntel {
+    if (!knownProject(projectId)) throw new IntelError("not-found", "Unknown project");
+    const items = store.items(projectId);
+    const prev = directions.get(projectId);
+    const cur = { paidWhen: prev?.paidWhen ?? null, priority: prev?.priority ?? null, focusItemIds: prev ? liveFocus(projectId, prev.focusItemIds, items) : [] };
+    const next = { ...cur };
+    if (patch.priority !== undefined) {
+      const v = patch.priority;
+      if (v !== null && (!Number.isInteger(v) || v < PRIORITY_MIN || v > PRIORITY_MAX)) throw new IntelError("invalid", `Priority must be a whole number from ${PRIORITY_MIN} to ${PRIORITY_MAX}`);
+      next.priority = v;
+    }
+    if (patch.paidWhen !== undefined) {
+      const v = patch.paidWhen === null ? "" : patch.paidWhen.trim();
+      if (v.length > DIRECTION_NOTE_MAX_CHARS) throw new IntelError("invalid", `"Paid when" is longer than ${DIRECTION_NOTE_MAX_CHARS} characters`);
+      next.paidWhen = v || null;
+    }
+    if (patch.focusItemIds !== undefined) {
+      const ids = [...new Set(patch.focusItemIds)];
+      if (ids.length > MAX_FOCUS_ITEMS) throw new IntelError("invalid", `At most ${MAX_FOCUS_ITEMS} items can matter most`);
+      const mine = new Set(items.map((i) => i.id));
+      if (ids.some((id) => !mine.has(id))) throw new IntelError("invalid", "Every focus item must belong to this project");
+      next.focusItemIds = ids;
+    }
+    const parts: string[] = [];
+    if (next.priority !== cur.priority) parts.push(next.priority === null ? "Direction: priority cleared" : `Direction: priority set to ${next.priority}`);
+    if (next.paidWhen !== cur.paidWhen) parts.push(next.paidWhen === null ? "Direction: paid when cleared" : `Direction: paid when ${short(next.paidWhen)}`);
+    if (JSON.stringify(next.focusItemIds) !== JSON.stringify(cur.focusItemIds)) {
+      const titles = next.focusItemIds.map((id) => items.find((i) => i.id === id)?.title ?? id);
+      parts.push(titles.length ? `Direction: matters most now: ${short(titles.join("; "))}` : "Direction: matters most now cleared");
+    }
+    if (!parts.length) return projectIntel(projectId);
+    const at = now().toISOString();
+    store.tx(() => {
+      directions.save({ projectId, ...next, updatedAt: at });
+      for (const summary of parts) store.addChange({ projectId, kind: "human_edit", summary, sources: ["human"] }, at);
+    });
+    refresh(projectId, "direction change");
+    return projectIntel(projectId);
+  }
+
+  function addDirectionNote(projectId: string | null, text: string, source: DirectionNote["source"]): DirectionNote {
+    if (projectId !== null && !knownProject(projectId)) throw new IntelError("not-found", "Unknown project");
+    if (source !== "voice" && source !== "ui") throw new IntelError("invalid", "Unknown note source");
+    const t = typeof text === "string" ? text.trim() : "";
+    if (!t) throw new IntelError("invalid", "The note is empty");
+    if (t.length > DIRECTION_NOTE_MAX_CHARS) throw new IntelError("invalid", `Notes are at most ${DIRECTION_NOTE_MAX_CHARS} characters`);
+    const at = now().toISOString();
+    let note: DirectionNote | undefined;
+    store.tx(() => {
+      note = directions.addNote(projectId, t, source, at);
+      store.addChange({ projectId, kind: "human_edit", summary: `Direction: noted ${short(t)}`, sources: [source === "voice" ? "voice" : "human"] }, at);
+    });
+    if (!note) throw new Error("note not stored");
+    if (projectId) refresh(projectId, "direction note");
+    return note;
+  }
+
+  function deleteDirectionNote(id: string): void {
+    const n = directions.note(id);
+    if (!n) throw new IntelError("not-found", "Unknown note");
+    const at = now().toISOString();
+    store.tx(() => {
+      directions.deleteNote(id);
+      store.addChange({ projectId: n.projectId, kind: "human_edit", summary: `Direction: note removed: ${short(n.text)}`, sources: ["human"] }, at);
+    });
+    if (n.projectId) refresh(n.projectId, "direction note removed");
+  }
+
+  function directionNotes(projectId: string | null | "all", limit: number): DirectionNote[] {
+    return directions.notes(projectId, Math.min(Math.max(0, Math.floor(limit)), 1000));
+  }
+
+  const directionApi = { direction, setDirection, addDirectionNote, deleteDirectionNote, directionNotes } satisfies DirectionApi;
+
   function brief(objectiveId: string): string | null {
     const { queue, byProject } = compute();
     const all = [...queue, ...[...byProject.values()].flatMap((r) => r.others)];
@@ -555,6 +676,7 @@ export function intelService(db: Db, options: IntelServiceOptions) {
   return {
     store, reconcile, reconcileSync, focus, projectIntel, putOutcome, addItem, patchItem, resolveProposal, brief, objectiveExists, knownProject, startScheduler, close, sourceHealth, gather,
     deliveryInput, setSchedule, setStep, markDemo, markSent, verifyItem, reopenItem, addFinishLineItems,
+    ...directionApi,
   };
 }
 export type IntelService = ReturnType<typeof intelService>;

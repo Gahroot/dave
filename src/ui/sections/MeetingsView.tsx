@@ -85,6 +85,7 @@ export function MeetingsView({ route, paused = false, refreshedAt = null }: { ro
     <nav className="workspace-filter" aria-label="Meeting sections">{SECTIONS.map(s => <a key={s.id} href={routeLink("meetings", { section: s.id === "promises" ? null : s.id })} aria-current={section === s.id ? "true" : undefined}>{s.label}{!!count(s.id) && <CountPill value={count(s.id) ?? 0} tone={s.id === "promises" && promiseGroups.some(g => g.id === "overdue") ? "red" : undefined} />}</a>)}</nav>
     {!items && !error && <Text role="status">Loading meetings…</Text>}
 
+    {section === "promises" && items && promiseGroups.length > 0 && <p className="panel-link-row"><a className="panel-link" href={routeLink("cleanup", { bucket: "overdue_promises" })}>Clean up in bulk</a></p>}
     {section === "promises" && items && (promiseGroups.length === 0
       ? <div className="app-panel"><EmptyState title="No open promises">Promises you make in analyzed meetings appear here with the words you used.</EmptyState></div>
       : promiseGroups.map(group => <section key={group.id} aria-labelledby={`promises-${group.id}`} className="meeting-group app-panel">

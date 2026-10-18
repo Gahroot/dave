@@ -306,6 +306,9 @@ export type ProjectFocusRow = {
   delivery: DeliveryProgress;
   /** First move's title, else "Send N tasks to EZcoder", else the first pause reason. */
   nextMove: string | null;
+  /** Your direction: what triggers payment, and your project priority (1 = most important), null when unset. */
+  paidWhen: string | null;
+  priority: number | null;
 };
 
 /** GET /api/intel/focus: everything the home screen needs (R6). */
@@ -342,6 +345,57 @@ export type ProjectIntel = {
   lastReconciledAt: string | null;
   /** Finish line, your moves and the copyable task list. */
   plan: DeliveryPlan;
+  /** What you told DAVE: paid when, priority, what matters most now, and your dated notes. */
+  direction: ProjectDirection;
+};
+
+/** Something you told DAVE (by voice or in the Direction panel). projectId null = about the whole portfolio. */
+export type DirectionNote = {
+  id: string;
+  projectId: string | null;
+  text: string;
+  source: "voice" | "ui";
+  createdAt: string;
+};
+export const DIRECTION_NOTE_MAX_CHARS = 500;
+export const DIRECTION_NOTES_PER_PROJECT = 200;
+export const PRIORITY_MIN = 1;
+export const PRIORITY_MAX = 5;
+
+/**
+ * Your direction for one project. It joins the deterministic ranking as named, visible reasons:
+ * owner_focus on objectives that target a focus item, owner_priority on every objective of a ranked project.
+ * Nothing here is DAVE's guess; every field was set by you.
+ */
+export type ProjectDirection = {
+  projectId: string;
+  /** What triggers payment, in your words (e.g. "Client signs off the booking flow"). null = not set. */
+  paidWhen: string | null;
+  /** 1 (most important) … 5, null = not ranked. */
+  priority: number | null;
+  /** "Matters most now": this project's item ids, in your order. */
+  focusItemIds: string[];
+  /** Newest first. */
+  notes: DirectionNote[];
+  /** null when no direction was ever saved. */
+  updatedAt: string | null;
+};
+
+/** Partial update; undefined leaves a field unchanged, null clears it. */
+export type DirectionPatch = { paidWhen?: string | null; priority?: number | null; focusItemIds?: string[] };
+
+/**
+ * The direction methods of IntelService (src/intel/service.ts implements them; voice and routes call them).
+ * Errors use IntelError: "not-found" for an unknown project or note, "invalid" for a focus id that is not this
+ * project's item, a priority outside 1–5, empty or over-long text.
+ */
+export type DirectionApi = {
+  direction(projectId: string): ProjectDirection;
+  setDirection(projectId: string, patch: DirectionPatch): ProjectIntel;
+  addDirectionNote(projectId: string | null, text: string, source: DirectionNote["source"]): DirectionNote;
+  deleteDirectionNote(id: string): void;
+  /** "all" = every note; null = portfolio-wide notes only. Newest first. */
+  directionNotes(projectId: string | null | "all", limit: number): DirectionNote[];
 };
 
 /** Routes (all under /api/intel, loopback + CSRF guard like the rest):
@@ -359,5 +413,8 @@ export type ProjectIntel = {
  *  POST /items/:itemId/verify {}             -> ProjectIntel
  *  POST /items/:itemId/reopen {note?}        -> ProjectIntel
  *  POST /proposals/:id/accept | /reject   {note?, lane? (accept, new_requirement only)}  -> FocusState
+ *  PUT  /projects/:id/direction {paidWhen?, priority?, focusItemIds?} -> ProjectIntel
+ *  POST /projects/:id/notes   {text}         -> {note: DirectionNote, intel: ProjectIntel}
+ *  POST /notes/:id/delete     {}             -> {ok: true}
  *  GET  /objectives/:id/brief                -> {brief:string}
  */

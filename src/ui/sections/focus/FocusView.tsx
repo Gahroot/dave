@@ -106,11 +106,13 @@ function ProjectRow({ row: r, lead, now }: { row: ProjectFocusRow; lead: ReactNo
       <a href={routeLink("focus", { project: r.projectId })}>{r.projectName}</a>
       {p.waitingOnClient && <StatusMark spec={MOVE_KIND.chase}>Waiting on client</StatusMark>}
       {p.overdue && <StatusMark spec={PROMISE_GROUP.overdue} strong>Overdue</StatusMark>}
+      {r.priority !== null && <span className="quiet-tag direction-priority-tag">Priority {r.priority}</span>}
     </span>
     <span className={r.nextMove ? "project-order-move" : "project-order-move is-calm"}>{r.nextMove ? <><ArrowRight size={14} aria-hidden="true" /><span><span className="visually-hidden">Next: </span>{r.nextMove}</span></> : "Nothing is waiting on you"}</span>
     <span className="project-order-sub">
       {p.confirmed && <span>{stepLabel(p)}</span>}
       {!p.delivered && <span>{behindLine(p)}</span>}
+      {r.paidWhen && <span className="direction-paid-when">Paid when {r.paidWhen}</span>}
       <span>{freshnessText(r.freshness, r.lastReconciledAt, now)}</span>
     </span>
     {p.confirmed && <span className="project-order-meter"><DoneMeter progress={p} /></span>}

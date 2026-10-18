@@ -13,10 +13,31 @@ import { Issues } from "./sections/Issues.tsx";
 import { handoff, relative } from "./format.ts";
 import { parseRoute, routeLink, safeReturn } from "./navigation.ts";
 import { useWorkspaceReturn } from "./hooks/useWorkspaceReturn.ts";
+import { DATA_CHANGED_EVENT, type DataChangedDetail } from "../voice/types.ts";
+import { useVoice, VoiceProvider } from "./voice/VoiceProvider.tsx";
+import { VoiceDock } from "./voice/VoiceDock.tsx";
+import { triageApi } from "./triage-api.ts";
 
 const AgentPlatform = lazy(() => import("./sections/AgentPlatform.tsx").then(m => ({ default: m.AgentPlatform })));
 const MeetingsView = lazy(() => import("./sections/MeetingsView.tsx").then(m => ({ default: m.MeetingsView })));
 const FocusRoute = lazy(() => import("./sections/focus/FocusView.tsx").then(m => ({ default: m.FocusRoute })));
+const CleanupView = lazy(() => import("./sections/CleanupView.tsx").then(m => ({ default: m.CleanupView })));
+const VoicePanel = lazy(() => import("./voice/VoicePanel.tsx").then(m => ({ default: m.VoicePanel })));
+
+export function App() {
+  return <VoiceProvider><Workspace /></VoiceProvider>;
+}
+
+/** Drawer and dock; the full-page panel renders on #voice instead. */
+function VoiceLayer({ page }: { page: boolean }) {
+  const voice = useVoice();
+  if (page) return null;
+  // The dock stays mounted (hidden) while the drawer is open, so closing the drawer can return focus to it.
+  return <>
+    <VoiceDock hidden={voice.open} />
+    {voice.open && <Suspense fallback={null}><VoicePanel variant="drawer" /></Suspense>}
+  </>;
+}
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000), headers: init?.body ? { "content-type": "application/json" } : undefined });
@@ -24,7 +45,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return await res.json() as T;
 }
 
-export function App() {
+function Workspace() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,6 +57,19 @@ export function App() {
   const saving = useRef(false);
   const lastLoad = useRef(0);
   const [route, setRoute] = useState(() => window.location.hash);
+  const [cleanupCount, setCleanupCount] = useState<number | null>(null);
+  useEffect(() => {
+    // The nav pill: unconfirmed noise with the default filter. Failures just hide it.
+    let abort = new AbortController();
+    const count = () => { abort.abort(); abort = new AbortController(); const mine = abort; triageApi.preview({}, mine.signal).then(p => { if (!mine.signal.aborted) setCleanupCount(p.total); }).catch(() => { if (!mine.signal.aborted) setCleanupCount(null); }); };
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<DataChangedDetail | undefined>).detail;
+      if (detail?.scopes.some(s => s === "meetings" || s === "intel")) count();
+    };
+    count();
+    window.addEventListener(DATA_CHANGED_EVENT, onChanged);
+    return () => { abort.abort(); window.removeEventListener(DATA_CHANGED_EVENT, onChanged); };
+  }, []);
   useWorkspaceReturn(route);
   const [, params = ""] = route.slice(1).split("?");
   const navigation = parseRoute(route);
@@ -73,6 +107,14 @@ export function App() {
     let disposed = false;
     void Promise.resolve().then(() => { if (!disposed) void load(false); });
     return () => { disposed = true; controller.current?.abort(); };
+  }, [load]);
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<DataChangedDetail | undefined>).detail;
+      if (detail?.scopes.includes("portfolio")) { lastLoad.current = 0; void load(false, true); }
+    };
+    window.addEventListener(DATA_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(DATA_CHANGED_EVENT, onChanged);
   }, [load]);
   useEffect(() => {
     if (paused) return;
@@ -141,7 +183,7 @@ export function App() {
     finally { saving.current = false; setBusyId(null); }
   };
 
-  return <WorkspaceShell destination={tab} actions={<Group gap="md" justify="flex-end" className="workspace-toolbar">
+  return <WorkspaceShell destination={tab} cleanupCount={cleanupCount} actions={<Group gap="md" justify="flex-end" className="workspace-toolbar">
     <Text size="sm" c="dimmed">Updated {relative(portfolio?.generatedAt ?? null)}</Text>
     <Group gap="xs"><Button variant="subtle" color="dark" disabled={!!busyId} leftSection={<IconRefresh size={14} aria-hidden="true" />} loading={busy} onClick={() => void load(true)}>Refresh</Button><Button variant="subtle" color="dark" leftSection={paused ? <IconPlay size={14} aria-hidden="true" /> : <IconPause size={14} aria-hidden="true" />} aria-pressed={paused} onClick={() => setPaused(v => !v)}>{paused ? "Resume auto-updates" : "Pause auto-updates"}</Button></Group>
   </Group>}>
@@ -149,8 +191,10 @@ export function App() {
           {(error || portfolio?.stale) && <Alert color="red" icon={<IconStale size={18} aria-hidden="true" />} title="Showing saved information" role="alert"><Group gap="xs" align="center">{error ?? portfolio?.refreshError}<Button variant="default" size="xs" leftSection={<IconRefresh size={14} aria-hidden="true" />} onClick={() => void load(true)}>Retry</Button></Group></Alert>}
           {pending && <Alert color="blue" icon={<IconUpdate size={18} aria-hidden="true" />} title="Updated information is ready" role="status"><Group gap="xs" align="center">Your focused item has stayed in place.<Button size="xs" onClick={() => { if (!document.querySelector("[data-summary-editing]")) { setPortfolio(pending); setPending(null); } }}>Apply update</Button></Group></Alert>}
           {(navigation.invalidSelection || navigation.invalidRun) && <Alert color="orange" icon={<IconInvalid size={18} aria-hidden="true" />} title="Invalid destination" role="alert">This link does not identify available work. Choose an item from the directory.</Alert>}
-          {!portfolio && tab !== "focus" && <Text role="status">{busy ? "Loading your portfolio…" : "No snapshot loaded."}</Text>}
+          {tab === "voice" && <Suspense fallback={<Text role="status">Loading DAVE…</Text>}><VoicePanel variant="page" /></Suspense>}
+          {!portfolio && tab !== "focus" && tab !== "voice" && tab !== "cleanup" && <Text role="status">{busy ? "Loading your portfolio…" : "No snapshot loaded."}</Text>}
           {tab === "focus" && <Suspense fallback={<Text role="status">Loading focus…</Text>}><FocusRoute route={route} paused={paused} /></Suspense>}
+          {tab === "cleanup" && <Suspense fallback={<Text role="status">Loading Clean up…</Text>}><CleanupView bucket={navigation.bucket} /></Suspense>}
           {tab === "connections" && <ConnectionsView />}
           {tab === "agents" && <Suspense fallback={<Text role="status">Loading agent desk…</Text>}><AgentPlatform paused={paused} /></Suspense>}
           {tab === "meetings" && <Suspense fallback={<Text role="status">Loading meetings…</Text>}><MeetingsView route={route} paused={paused} refreshedAt={portfolio?.generatedAt ?? null} /></Suspense>}
@@ -171,5 +215,6 @@ export function App() {
             {tab === "issues" && <Issues issues={portfolio.issues} coverage={portfolio.coverage} />}
           </>}
         </Stack>
+        <VoiceLayer page={tab === "voice"} />
   </WorkspaceShell>;
 }

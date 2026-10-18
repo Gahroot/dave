@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { DATA_CHANGED_EVENT, type DataChangedDetail } from "../../../voice/types.ts";
 
 const POLL_MS = 60_000;
 const editing = () => !!document.querySelector("[data-intel-editing]") || !!document.activeElement?.closest("textarea, input, select");
@@ -37,6 +38,15 @@ export function useIntelResource<T>(load: (signal: AbortSignal) => Promise<T>, k
     const timer = window.setInterval(tick, POLL_MS);
     return () => window.clearInterval(timer);
   }, [paused, reload]);
+
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<DataChangedDetail | undefined>).detail;
+      if (detail?.scopes.includes("intel")) { background.current = true; reload(); }
+    };
+    window.addEventListener(DATA_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(DATA_CHANGED_EVENT, onChanged);
+  }, [reload]);
 
   const applyPending = useCallback(() => { setPending(p => { if (p) setData(p); return null; }); }, []);
   return { data, setData, pending, applyPending, error, loading, reload };

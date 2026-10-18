@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { parseRoute, routeLink, safeReturn } from "../src/ui/navigation.ts";
 
 describe("workspace navigation", () => {
+  it("opens Clean up with a validated bucket and allows it as a return target", () => {
+    expect(parseRoute("#cleanup")).toMatchObject({ destination: "cleanup", bucket: null });
+    expect(parseRoute(routeLink("cleanup", { bucket: "meeting_decisions" }))).toMatchObject({ destination: "cleanup", bucket: "meeting_decisions" });
+    expect(parseRoute("#cleanup?bucket=everything").bucket).toBeNull();
+    expect(parseRoute("#meetings?bucket=old_asks").bucket).toBeNull();
+    expect(safeReturn("#cleanup?bucket=old_asks&prompt=private")).toBe("#cleanup?bucket=old_asks");
+  });
   it("preserves legacy queue, project and handoff links", () => {
     expect(parseRoute("#queue?item=req-1&delivery=project-1")).toMatchObject({ destination: "queue", item: "req-1", delivery: "project-1" });
     expect(parseRoute("#projects?id=one&q=a%20b&waiting=1")).toMatchObject({ id: "one", q: "a b", waiting: true, tab: "delivery" });
@@ -64,5 +71,12 @@ describe("workspace navigation", () => {
     expect(parseRoute("#focus?project=abc_1")).toMatchObject({ destination: "focus", project: "abc_1", invalidSelection: false });
     expect(parseRoute("#focus?project=../x").invalidSelection).toBe(true);
     expect(parseRoute("#focus?project=../x").project).toBeNull();
+  });
+  it("adds the voice destination without widening safe returns", () => {
+    expect(parseRoute("#voice").destination).toBe("voice");
+    expect(parseRoute("#voice?project=p1")).toMatchObject({ destination: "voice", invalidSelection: false });
+    expect(routeLink("voice")).toBe("#voice");
+    expect(safeReturn("#voice")).toBeNull();
+    expect(safeReturn("#focus?project=p1")).toBe("#focus?project=p1");
   });
 });

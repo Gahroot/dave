@@ -18,6 +18,8 @@ export type PrioritizeProject = {
   outcomeDraftPending: boolean;
   /** Set when stored information is stale / sources are degraded. */
   uncertain: string | null;
+  /** Your direction. Absent or empty = ranking exactly as without it. */
+  direction?: { priority: number | null; focusItemIds: string[] };
 };
 export type ProjectObjectives = { objective: Objective | null; others: Objective[] };
 
@@ -195,9 +197,26 @@ export function briefFor(o: Pick<Objective, "objective" | "whyNow" | "definition
 const order = (a: Objective, b: Objective): number =>
   b.score - a.score || (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") || a.projectName.localeCompare(b.projectName) || a.id.localeCompare(b.id);
 
+/** Points for your project priority: #1 +45, #2 +30, #3 +18, #4 +8, #5 +0 (still listed). */
+export const OWNER_PRIORITY_POINTS: Record<number, number> = { 1: 45, 2: 30, 3: 18, 4: 8, 5: 0 };
+export const OWNER_FOCUS_POINTS = 60;
+
+function directionReasons(c: Candidate, d: PrioritizeProject["direction"]): Reason[] {
+  if (!d) return [];
+  const out: Reason[] = [];
+  if (d.focusItemIds.length && c.targetItemIds.some((id) => d.focusItemIds.includes(id))) {
+    out.push({ code: "owner_focus", points: OWNER_FOCUS_POINTS, detail: "You told DAVE this matters most right now" });
+  }
+  const pts = d.priority === null ? undefined : OWNER_PRIORITY_POINTS[d.priority];
+  if (d.priority !== null && pts !== undefined) {
+    out.push({ code: "owner_priority", points: pts, detail: d.priority === 5 ? "You ranked this project #5" : `You ranked this project #${d.priority} of your priorities` });
+  }
+  return out;
+}
+
 export function prioritizeProject(p: PrioritizeProject, now: Date): ProjectObjectives {
   const built = candidates(p, now).map((c): Objective => {
-    const scoreReasons = [...c.reasons].sort((a, b) => b.points - a.points || a.code.localeCompare(b.code));
+    const scoreReasons = [...c.reasons, ...directionReasons(c, p.direction)].sort((a, b) => b.points - a.points || a.code.localeCompare(b.code));
     const humanOnly = isHumanOnly(c.category);
     const evidence = evidenceOf(c.targets);
     const inferredExternal = c.targets.some((t) => t.basis === "inferred" && (t.kind === "commitment" || t.kind === "blocker"));

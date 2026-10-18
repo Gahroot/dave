@@ -6,6 +6,8 @@ import { migrateAgentPlatform } from "./migrations/009-agent-platform.ts";
 import { migrateMeetings } from "./migrations/010-meetings.ts";
 import { migrateIntel } from "./migrations/011-intel.ts";
 import { migrateDeliveryLeverage } from "./migrations/012-delivery-leverage.ts";
+import { migrateVoice } from "./migrations/013-voice.ts";
+import { migrateTriage } from "./migrations/014-triage.ts";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -14,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const SCHEMA = fileURLToPath(new URL("./schema.sql", import.meta.url));
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 14;
 const ATTENTION = fileURLToPath(new URL("./migrations/004_attention.sql", import.meta.url));
 
 /**
@@ -69,6 +71,8 @@ export function openDb(appHome: string, beforeMigrationCommit?: (db: Db) => void
       if (previous < 10) migrateMeetings(db);
       if (previous < 11) migrateIntel(db);
       if (previous < 12) migrateDeliveryLeverage(db);
+      if (previous < 13) migrateVoice(db);
+      if (previous < 14) migrateTriage(db);
       if (previous !== SCHEMA_VERSION) {
         db.exec("DELETE FROM schema_meta");
         db.prepare("INSERT INTO schema_meta (version) VALUES (?)").run(SCHEMA_VERSION);

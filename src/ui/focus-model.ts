@@ -263,3 +263,16 @@ export function homePulse(state: { projects: readonly ProjectFocusRow[]; decisio
 export function visibleMoves<T extends Move>(moves: readonly T[]): { shown: T[]; more: T[] } {
   return { shown: moves.slice(0, VISIBLE_MOVES), more: moves.slice(VISIBLE_MOVES) };
 }
+
+/** Readable names for objective score reasons (the ranking's named parts). Unknown codes fall back to the code. */
+export const SCORE_REASON_LABEL: Readonly<Record<string, string>> = {
+  deadline_overdue: "Overdue", deadline_imminent: "Due within 3 days", deadline_soon: "Due within a week", deadline_upcoming: "Due within 2 weeks", deadline_later: "Has a date",
+  external_blocker: "Waiting on someone else", blocks_delivery: "Blocks other work", client_dependency: "Client promise pending", external_commitment: "Promise to the client",
+  unverified_implementation: "Built but not checked", build_next: "Next agreed scope", delivery_gap: "Not yet in the client's hands", needs_outcome: "No finish line yet",
+  owner_focus: "You said this matters most now", owner_priority: "Your project priority",
+};
+export const scoreReasonLabel = (code: string): string => SCORE_REASON_LABEL[code] ?? code.replace(/_/g, " ");
+/** The reasons your direction added to an objective, in score order. */
+export const directionReasons = (o: { scoreReasons: readonly { code: string; points: number; detail: string }[] } | null): { code: string; points: number; detail: string }[] =>
+  o ? o.scoreReasons.filter(r => r.code === "owner_focus" || r.code === "owner_priority") : [];
+export const PRIORITY_LABEL: Readonly<Record<number, string>> = { 1: "1 · most important", 2: "2 · high", 3: "3 · medium", 4: "4 · low", 5: "5 · least important" };

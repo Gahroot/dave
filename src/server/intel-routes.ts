@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { IntelError, EVIDENCE_STATES, ITEM_KINDS, ITEM_STATUSES, MAX_ACCEPTANCE_CRITERIA, OWNERS, type FinishLineInput, type IntelService, type ItemFields } from "../intel/service.ts";
-import { DELIVERY_STAGES, LANES, MARKABLE_STEPS, READINESS_LEVELS, type DeliveryStage, type ItemKind, type Lane, type MarkableStep, type Owner, type ReadinessLevel } from "../intel/types.ts";
+import { IntelError, EVIDENCE_STATES, ITEM_KINDS, ITEM_STATUSES, MAX_ACCEPTANCE_CRITERIA, MAX_FOCUS_ITEMS, OWNERS, type FinishLineInput, type IntelService, type ItemFields } from "../intel/service.ts";
+import { DIRECTION_NOTE_MAX_CHARS, PRIORITY_MAX, PRIORITY_MIN, type DirectionPatch, DELIVERY_STAGES, LANES, MARKABLE_STEPS, READINESS_LEVELS, type DeliveryStage, type ItemKind, type Lane, type MarkableStep, type Owner, type ReadinessLevel } from "../intel/types.ts";
 import { strictObject } from "./provider-routes.ts";
 
 const bad = (message = "Invalid request"): never => { throw new IntelError("invalid", message); };
@@ -201,6 +201,40 @@ export function registerIntelRoutes(app: FastifyInstance, intel: IntelService) {
       } catch (e) { return fail(e, reply); }
     });
   }
+
+  app.put<{ Params: { id: string } }>("/api/intel/projects/:id/direction", async (req, reply) => {
+    try {
+      const id = project(req.params.id);
+      const b = body(req, [], ["paidWhen", "priority", "focusItemIds"]);
+      if (b.paidWhen === undefined && b.priority === undefined && b.focusItemIds === undefined) bad("Nothing to change");
+      const patch: DirectionPatch = {};
+      if (b.paidWhen !== undefined) patch.paidWhen = b.paidWhen === null ? null : text(b.paidWhen, DIRECTION_NOTE_MAX_CHARS, 0);
+      if (b.priority !== undefined) {
+        if (b.priority !== null && (typeof b.priority !== "number" || !Number.isInteger(b.priority) || b.priority < PRIORITY_MIN || b.priority > PRIORITY_MAX)) bad("Invalid priority");
+        patch.priority = b.priority === null ? null : Number(b.priority);
+      }
+      if (b.focusItemIds !== undefined) patch.focusItemIds = list(b.focusItemIds, MAX_FOCUS_ITEMS, 16).map(hex);
+      return intel.setDirection(id, patch);
+    } catch (e) { return fail(e, reply); }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/intel/projects/:id/notes", async (req, reply) => {
+    try {
+      const id = project(req.params.id);
+      const b = body(req, ["text"]);
+      const note = intel.addDirectionNote(id, text(b.text, DIRECTION_NOTE_MAX_CHARS), "ui");
+      return { note, intel: intel.projectIntel(id) };
+    } catch (e) { return fail(e, reply); }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/intel/notes/:id/delete", async (req, reply) => {
+    try {
+      const id = hex(req.params.id);
+      body(req, []);
+      intel.deleteDirectionNote(id);
+      return { ok: true };
+    } catch (e) { return fail(e, reply); }
+  });
 
   app.get<{ Params: { id: string } }>("/api/intel/objectives/:id/brief", async (req, reply) => {
     try {

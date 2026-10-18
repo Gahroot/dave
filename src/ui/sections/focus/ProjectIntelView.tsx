@@ -13,6 +13,7 @@ import { intelApi, type ItemPatch, type OutcomeInput } from "../../intel-api.ts"
 import { routeLink } from "../../navigation.ts";
 import { EVIDENCE_STATE, LANE, OBJECTIVE_CATEGORY, READINESS_LEVEL } from "../../status.ts";
 import { AgreementImport } from "./AgreementImport.tsx";
+import { DirectionPanel } from "./DirectionPanel.tsx";
 import { Extras, FinishLineSummary, Moves, TaskList, revealId, type Reveal, type Run } from "./DeliveryPlan.tsx";
 import { BasisMark, ErrorLine, EvidenceMark, FreshnessMark, ProvenanceList, ReadinessStrip } from "./parts.tsx";
 import { useIntelResource } from "./useIntelResource.ts";
@@ -71,6 +72,7 @@ export function ProjectIntelView({ projectId, paused }: { projectId: string; pau
     {data && <>
       <Group gap="md" className="row-sub"><FreshnessMark freshness={data.freshness} /><span>{freshnessText(data.freshness, data.lastReconciledAt, now)}</span></Group>
       <FinishLineSummary data={data} now={now} />
+      <DirectionPanel data={data} busy={busy} run={run} now={now} />
       <Moves data={data} busy={busy} run={run} reveal={reveal} revealed={revealed} />
       <TaskList data={data} busy={busy} run={run} reveal={reveal} />
       <Extras data={data} busy={busy} run={run} />

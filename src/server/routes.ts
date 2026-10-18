@@ -5,6 +5,17 @@ import { emptySummary } from "../shared/types.ts";
 import type { AttentionAction, ProjectSummary } from "../shared/types.ts";
 import type { SourcePaths } from "../shared/paths.ts";
 import type { Repo } from "../db/repo.ts";
+import type { Portfolio } from "../shared/types.ts";
+
+/** In-process portfolio operations for other server modules (voice). Same behaviour as the routes. */
+export type PortfolioHelpers = {
+  refresh(): Promise<Portfolio>;
+  current(): Promise<Portfolio>;
+  /** null when the item is unknown. */
+  attention(id: string, action: AttentionAction): Portfolio | null;
+  /** false when the project is unknown. Marks the snapshot dirty like the override route. */
+  override(id: string, next: { pinned?: boolean; hidden?: boolean }): boolean;
+};
 
 const EDITABLE = ["recentFocus", "completed", "unfinished", "suggestedNextAction"] as const;
 type EditableField = (typeof EDITABLE)[number];
@@ -18,7 +29,7 @@ const MAX_LEN = 400;
 export function registerRoutes(app: FastifyInstance, paths: SourcePaths, repo: Repo,
   options: { clock?: () => Date; refresh?: typeof refresh; hooks?: RefreshHooks;
     /** Runs in the same transaction as an Inbox action, so meeting items follow it. */
-    onAttentionAction?: (id: string, action: AttentionAction, now: Date) => void } = {}): void {
+    onAttentionAction?: (id: string, action: AttentionAction, now: Date) => void } = {}): PortfolioHelpers {
   const act = (id: string, action: AttentionAction) => repo.transaction(() => {
     const now = clock();
     repo.attentionAction(id, action, now);
@@ -60,6 +71,13 @@ export function registerRoutes(app: FastifyInstance, paths: SourcePaths, repo: R
     return dirty || !snapshot || snapshot.stale ? refreshOnce() : snapshot;
   };
 
+  const setOverride = (id: string, next: { pinned?: boolean; hidden?: boolean }) => {
+    const override = repo.setOverride(id, next, new Date().toISOString());
+    dirty = true;
+    localRevision++;
+    return override;
+  };
+
   app.get("/api/portfolio", async () => current());
   app.post("/api/refresh", async () => refreshOnce());
   app.get("/api/issues", async () => ({ issues: repo.issues().filter(retainedIssue) }));
@@ -78,10 +96,7 @@ export function registerRoutes(app: FastifyInstance, paths: SourcePaths, repo: R
     if (Object.keys(next).length === 0) {
       return reply.code(400).send({ error: "expected pinned and/or hidden booleans" });
     }
-    const override = repo.setOverride(id, next, new Date().toISOString());
-    dirty = true;
-    localRevision++;
-    return { ok: true, override };
+    return { ok: true, override: setOverride(id, next) };
   });
 
   /** Optional: correct a generated summary. Corrections survive regeneration. */
@@ -149,4 +164,23 @@ export function registerRoutes(app: FastifyInstance, paths: SourcePaths, repo: R
     act(id, action === "acknowledge" ? "handled" : "dismiss");
     return { ok: true, inbox: repo.inbox(clock()), portfolio: stored() };
   });
+
+  return {
+    refresh: () => refreshOnce(),
+    current: async () => {
+      const value = await current();
+      if (!value) throw new Error("no portfolio snapshot");
+      return value;
+    },
+    attention: (id, action) => {
+      if (!validId(id) || !repo.hasInboxItem(id)) return null;
+      act(id, action);
+      return stored();
+    },
+    override: (id, next) => {
+      if (!repo.projects().some((p) => p.id === id)) return false;
+      setOverride(id, next);
+      return true;
+    },
+  };
 }

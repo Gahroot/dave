@@ -3,8 +3,8 @@
 Open one ranked decision queue, find the project context, and remember what you
 handled. No setup forms, model calls, agent installation or business metadata.
 It reads existing EZBoss, EZCoder, pew2 and Git evidence. A quiet queue is valid.
-The opt-in extras below (delivery planning, Agent desk, Fathom meetings) change this
-only after you connect them.
+The opt-in extras below (delivery planning, Agent desk, Fathom meetings, Talk to DAVE)
+change this only after you connect them.
 
 ## Run it
 
@@ -122,6 +122,100 @@ turn analysis on.
 - **Forget and disconnect.** "Forget meeting" deletes its transcript and items and
   prevents re-import. Disconnect removes the key and can keep or delete meetings.
   Transcripts stay in `pcc.db` (and its migration backups) on this Mac.
+
+## Clean up
+
+Meeting analysis picks up many small promises that never mattered, and some of them
+then show as Overdue. **Clean up** in the rail, with a count of what looks like noise,
+lists them in five groups: overdue promises, old promises with no date (meeting at least
+3 weeks ago), ones DAVE thinks look done, old client asks (meeting at least 30 days
+ago), and drafted decisions from meetings. Filter by project or text, use **Select all**
+per group, then **Clear N selected** or **Mark N done**. There is no confirm dialog: the
+click is the decision, and **Undo** is right there and under "Recent clean-ups".
+
+- **Clearing is not deleting.** A cleared meeting promise is marked dropped by you, so it
+  leaves Meetings, the Inbox, Focus and the ranking, and re-analysis keeps it dropped.
+- **One click clears it everywhere.** The same sentence can appear as a meeting promise,
+  an Inbox row, an inferred plan item and a "Confirm commitment" decision. Clean up
+  closes all of them together and logs one change per project. A plan item stays open if
+  it has another open meeting source, if you locked it, or if you added or confirmed it.
+  Those are reported as kept.
+- **Fewer duplicates from now on.** Closing a meeting promise yourself closes its
+  inferred plan item directly, with no "Drop as obsolete" decision. Rejecting a "Confirm
+  commitment" decision also drops its open meeting promise.
+- **Undo is safe.** Undo restores only items still exactly as the clean-up left them, so
+  anything you changed since is never overwritten.
+- Promises you confirmed or edited are hidden unless you switch on "Include ones you
+  confirmed", and they are never preselected. Clean up never runs on its own.
+
+Code: `src/triage/`, `src/server/triage-routes.ts`, `src/ui/sections/CleanupView.tsx`,
+`src/ui/cleanup-model.ts`. Entry links sit on Focus ("Clean up drafted decisions",
+"Clean up overdue promises") and in Meetings ("Clean up in bulk").
+
+## Talk to DAVE (optional)
+
+A voice partner for setting and refining each project's finish line, what gets you
+paid and what matters most right now. Open it with **Talk to DAVE** in the rail, the
+dark puck at the bottom right of every page, `Alt+Shift+D`, or `#voice` for a full
+page. You can also type. The session keeps going while you move between pages.
+
+- **Connection.** Voice uses the OpenAI connection from **Connections** (ChatGPT
+  sign-in, tokens in the Keychain). On **Talk**, the server mints a 10-minute
+  ephemeral secret from `/v1/realtime/client_secrets`. Only that `ek_` secret reaches
+  the browser, which talks to `/v1/realtime/calls` over WebRTC. There is no API-key
+  fallback: if your plan is refused, the panel says so (401 → reconnect, 403 → not
+  available on this plan). `DAVE_VOICE=off` turns voice off. Defaults:
+  `gpt-realtime-2.1`, voice `marin`, hands-free (push-to-talk with Space is a setting).
+- **What leaves this Mac.** Your conversation, DAVE's tool results and any document
+  DAVE reads for you go to OpenAI Realtime on your ChatGPT account; the line under
+  **Talk** says this. Meeting transcripts and verbatim quotes are never sent, only
+  DAVE's wording of meeting items. Every model-facing string passes `speakable()`
+  (`src/voice/safety.ts`), which redacts secrets and drops URLs, paths and code.
+  Voice transcripts and summaries stay in `pcc.db` (last 100 sessions, 2,000 actions).
+- **Writes need a yes.** Reads, `remember`, attaching a document, opening a page and
+  pulling updates happen at once. Every other change (finish line, paid when,
+  priority, focus, items, decisions, steps, Inbox and meeting items, pins, forgetting
+  a note) only *prepares* on the first call. DAVE reads one sentence and asks "Okay?".
+  Your spoken yes or the amber **Confirm** card runs exactly the stored action
+  (single-use token, 2 minutes, bound to the session). Calls are journaled by call id,
+  so a repeat returns the first result. Agent desk, Fathom keys, the OpenAI
+  connection and hiding projects are not voice tools.
+- **Approve all for this session.** Press **Approve all** on a confirm card (or the
+  small switch under **Talk**), or say so yourself ("you have my approval", "don't
+  ask, just do it"). From then on, changes apply at once and DAVE says what it did in
+  one sentence. Any open confirm cards are accepted in order. A spoken grant counts
+  only when your own last words contain it; text in a document, meeting item or tool
+  result can never switch it on. While it is on, a banner on the stage and a badge on
+  the dock show it. **Turn off** or "ask me again" ends it, and it always ends with the
+  conversation. It is kept in memory only, and each switch is logged in the session
+  history.
+- **Clean up by voice.** "Clear out the old meeting promises" makes DAVE count the noise
+  (`find_noise`) and prepare one `clean_up` card ("Clear 41 items", with the first
+  titles). The card runs exactly the items it listed. "Undo that" restores the last
+  clean-up.
+- **Direction.** Each project's Focus page has a **Your direction** panel, which
+  voice edits too: *Paid when*, *Priority* 1–5 and *Matters most now* (finish-line
+  items), plus dated notes of what you told DAVE. They add visible reasons to the
+  next-objective ranking (`/api/intel/focus`, the change log and DAVE's
+  recommendations): a focus item +60, and priority #1 +45, #2 +30, #3 +18, #4 +8,
+  #5 +0. Every change is logged as "Direction: …". The Focus home still orders
+  projects by the behind score and shows priority and paid-when as labels.
+- **Documents.** Drop, paste or pick contracts, photos and documents on the panel.
+  `POST /api/files` takes raw bytes up to 25 MB, identifies the type by its content
+  (PDF, PNG, JPEG, GIF, WebP, HEIC, DOCX, RTF, HTML, plain text; anything else is
+  refused), and dedupes by sha256. Files go to `PCC_HOME/documents` (0600) with a
+  1 GB total cap. Text comes from fixed macOS tools (`textutil`, PDFKit, Vision OCR)
+  only on upload, with a 30 s timeout; other platforms keep the file without text.
+  DAVE reads documents only when asked and can offer a contract's deliverables as the
+  finish line. A small image is also sent as a picture.
+- **Live news.** While a session is live, DAVE polls Focus every 90 seconds and tells
+  the model about a new top objective or new decisions. Hands-free sessions end after
+  5 minutes without speech.
+
+Code: `src/voice/`, `src/documents/`, `src/server/{voice,document}-routes.ts`,
+`src/ui/voice/`, `src/ui/mascot/` (the DAVE bot) and
+`src/ui/sections/focus/DirectionPanel.tsx`. Tests use a fake fetch and a fake
+extractor; nothing calls OpenAI or the Keychain.
 
 ## Bounded delivery coordination (optional)
 
@@ -288,6 +382,16 @@ checks every argv and a read spy checks no deny-listed file and nothing in
 
 ## Storage and migration protection
 
+Schema v14 (`src/db/migrations/014-triage.ts`) only adds the `triage_batches` table,
+which records each clean-up and the before and after state of every row it changed, so
+Undo works. Nothing existing is rewritten. The automatic `backups/v13-*.db` copy is the
+way back.
+
+Schema v13 (`src/db/migrations/013-voice.ts`) only adds tables: project direction and
+notes, shared documents (metadata and extracted text; the files sit in
+`PCC_HOME/documents`), voice settings, voice sessions and the voice action journal.
+Nothing existing is rewritten. The automatic `backups/v12-*.db` copy is the way back.
+
 Schema v12 adds delivery-leverage columns additively (item lane, goal, verified and
 sent times, "Not right" count; outcome confirmation, start/target dates, delivery-step
 marks and last demo). Two values are backfilled as approximations because the real
@@ -323,6 +427,23 @@ clipboard denial, handling/Undo, Back/Forward, 320px and 200% text, empty/error/
 and visible-only automatic updates. Screenshots are synthetic and ignored.
 See `DESIGN.md` for measured versus unverified acceptance, including the real-project
 check and the remaining screen-reader/audit gaps. No WCAG conformance claim.
+
+Voice has its own synthetic fixture. After `npm run build`, start
+`node --experimental-strip-types test/voice-ui-fixture.ts` (port 4327; restart it for
+each run because the walkthrough edits direction), then run
+`PLAYWRIGHT_MODULE=… node test/voice-ui-walkthrough.mjs`. A fake provider and a fake
+mint stand in for OpenAI, a fake WebRTC peer replaces the call, and `api.openai.com`
+is routed to a local stub, so no audio or network leaves the machine. It checks the
+dock, Direction reordering, session start (ephemeral secret, no model in the SDP URL,
+no forbidden tools), confirm before write, PDF and PNG upload, typing, settings, history,
+390 and 1440 px, contrast and 44 px targets on the stage, and that the synthetic
+ChatGPT token never appears in a response. The fixture also seeds synthetic meeting
+noise. The walkthrough checks Approve all: the button accepts open cards, the next write
+applies at once, a refused spoken grant offers the button, and approval ends with the
+session. It also checks Clean up: the page and nav count, clearing a group lowers the
+Inbox, Meetings and commitment counts, Undo restores them, voice `clean_up` and Undo
+work, and the page fits at 390 px. It captures the 3D DAVE at hero (180 px) and dock (64 px)
+size, plus a pose spun by dragging. Screenshots go to `.ezcoder/screenshots/voice/`.
 
 ## Layering
 
@@ -378,7 +499,8 @@ With no target date the last two parts are weighted 60/40, and "Set a target dat
 becomes a move. One click accepts DAVE's suggestion, which is the latest due date
 among finish-line items and your own commitments. Projects without a confirmed finish
 line sit under **Needs a finish line**. Delivered projects sit under **Delivered**.
-Money and payment terms are not part of the score.
+Money and payment terms are not part of the score. Your Direction priority and
+paid-when show on the row but do not change this order (see "Talk to DAVE").
 
 **% done.** Production-ready is worth 70%, split evenly across finish-line items, and an
 item counts only once **you** mark it Verified. *Live*, *Client using it* and *Signed

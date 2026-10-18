@@ -5,6 +5,7 @@ import type {
 import { hash, itemId, type IntelStore } from "./store.ts";
 import { titleMatches } from "./scope.ts";
 import { draftOutcome } from "./outcome.ts";
+import { closableIntelItem } from "../triage/links.ts";
 
 /** Everything the reconciler reads for one project. Gathered by the caller so tests need no live sources. */
 export type PlanMilestoneInput = {
@@ -33,6 +34,8 @@ export type ReconcileReport = { projectId: string; itemsAdded: number; itemsUpda
 type Fact = {
   kind: ItemKind; title: string; detail: string | null; owner: Owner; dueDate: string | null; acceptance: string[];
   prov: Provenance; closing: "done" | "dropped" | null; fromPlan: PlanMilestoneInput | null;
+  /** Who set the meeting item's status (meeting facts only). */
+  statusSource?: MeetingItem["statusSource"];
 };
 
 const RESOURCE = /(credential|api[ -]?key|password|login|access|token|permission|sandbox|account|secret|certificate|dns|whitelist|invite)/i;
@@ -47,6 +50,7 @@ export const isBlockerText = (text: string, kind: MeetingItem["kind"], speaker: 
 };
 
 const day = (iso: string): string => iso.slice(0, 10);
+const CLOSED_BY_YOU = "Closed by you in Meetings";
 
 function meetingProv(m: MeetingItem): Provenance {
   const at = m.meetingAt || m.createdAt;
@@ -61,7 +65,7 @@ function meetingFact(m: MeetingItem): Fact | null {
   const closing: Fact["closing"] = m.status === "done" ? "done" : m.status === "dropped" ? "dropped" : null;
   const prov = meetingProv(m);
   const owner: Owner = m.speakerRole === "me" || m.speakerRole === "teammate" ? "me" : m.speakerRole === "client" ? "client" : "unknown";
-  const base = { detail: null, acceptance: [] as string[], closing, prov, fromPlan: null };
+  const base = { detail: null, acceptance: [] as string[], closing, prov, fromPlan: null, statusSource: m.statusSource };
   if (isBlockerText(m.text, m.kind, m.speakerRole)) {
     return { ...base, kind: "blocker", title: m.text, owner: THIRD.test(m.text) ? "third_party" : "client", dueDate: m.dueDate };
   }
@@ -101,6 +105,7 @@ export function reconcileProject(store: IntelStore, input: ReconcileInput, now: 
     const facts = [...input.meetingItems.map(meetingFact).filter((f): f is Fact => f !== null), ...planFacts(input),
       ...extra.map((e): Fact => ({ kind: e.kind, title: e.title, detail: e.detail ?? null, owner: e.owner ?? "unknown", dueDate: e.dueDate ?? null, acceptance: [], closing: null, fromPlan: null, prov: e.provenance }))]
       .sort((a, b) => a.prov.observedAt.localeCompare(b.prov.observedAt) || String(a.prov.sourceId).localeCompare(String(b.prov.sourceId)));
+    const closedMeetingIds = new Set(input.meetingItems.filter((m) => m.status === "done" || m.status === "dropped").map((m) => m.id));
     const planIds = new Map(input.milestones.map((m) => [m.position, itemId(input.projectId, "milestone", m.title)]));
 
     // A single meeting stating one commitment with two different dates is a conflict, not an update.
@@ -167,7 +172,17 @@ export function reconcileProject(store: IntelStore, input: ReconcileInput, now: 
           summary: `Deadline for "${item.title}" ${item.dueDate ? `moved ${item.dueDate} → ${f.dueDate}` : `set to ${f.dueDate}`}`,
           patch: { op: "update_item", itemId: item.id, fields: { dueDate: f.dueDate } }, provenance: [f.prov] });
       }
-      if (f.closing && !["done", "dropped", "obsolete"].includes(item.status)) {
+      // You closed the meeting item yourself: an inferred, unlocked item backed only by closed meetings follows directly.
+      let closedByYou = false;
+      if (f.closing && f.prov.sourceKind === "meeting" && f.statusSource === "user" && item.basis === "inferred" && closableIntelItem(item, closedMeetingIds)) {
+        closedByYou = true;
+        next.status = f.closing === "done" ? "done" : "obsolete";
+        changed = true;
+        for (const p of store.proposals(input.projectId)) {
+          if (p.status === "pending" && p.itemId === item.id) store.resolveProposal(p.id, "rejected", CLOSED_BY_YOU, at);
+        }
+        store.addChange({ projectId: input.projectId, kind: "item_updated", summary: `"${item.title}" ${f.closing === "done" ? "done" : "dropped"}: ${CLOSED_BY_YOU.toLowerCase()}`, itemId: item.id, sources: [f.prov.label] }, at);
+      } else if (f.closing && !["done", "dropped", "obsolete"].includes(item.status)) {
         const done = f.closing === "done";
         propose({ projectId: input.projectId, kind: done ? "mark_complete" : "mark_obsolete", material: true, itemId: item.id,
           summary: done ? `Mark done: ${item.title}` : `Drop as obsolete: ${item.title}`,
@@ -201,6 +216,10 @@ export function reconcileProject(store: IntelStore, input: ReconcileInput, now: 
       if (!item.locked && !isPlan) {
         const merged = withProv(item.provenance, f.prov);
         if (merged) { next.provenance = merged; next.lastSupportedAt = maxAt(merged, item.lastSupportedAt); changed = true; }
+      }
+      if (closedByYou) {
+        const human: Provenance = { sourceKind: "human", sourceId: null, label: CLOSED_BY_YOU, quote: null, observedAt: at, confidence: "high", link: null };
+        next.provenance = withProv(next.provenance, human) ?? next.provenance;
       }
       if (changed) {
         next.updatedAt = at;

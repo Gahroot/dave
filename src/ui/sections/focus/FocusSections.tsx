@@ -16,7 +16,8 @@ export function Decisions({ decisions, busy, now, onAct }: { decisions: Proposal
   const groups = groupDecisions(decisions);
   return <section aria-labelledby="dec-h" className="app-panel">
     <PanelHead id="dec-h" title="Waiting on you" spec={decisions.length ? MOVE_KIND.decide : { ...MOVE_KIND.decide, tone: "gray" }} count={decisions.length} countTone="amber"
-      note={decisions.length ? "Decisions DAVE never makes for you. Nothing here is applied until you choose." : undefined} />
+      note={decisions.length ? "Decisions DAVE never makes for you. Nothing here is applied until you choose." : undefined}
+      actions={<a className="panel-link" href={routeLink("cleanup", { bucket: "meeting_decisions" })}>Clean up drafted decisions</a>} />
     {!decisions.length ? <Text c="dimmed" className="panel-empty">No decisions are waiting.</Text> : groups.map(g => {
       const headId = `dec-${g.projectId}`;
       return <div key={g.projectId} className="decision-group" role="group" aria-labelledby={headId}>
@@ -60,7 +61,8 @@ export function External({ state, now }: { state: FocusState; now: number }) {
   const { blockers, commitments } = state.external;
   const count = blockers.length + commitments.length;
   return <section aria-labelledby="ext-h" className="app-panel">
-    <PanelHead id="ext-h" title="Waiting on others and upcoming commitments" spec={blockers.length ? MOVE_KIND.chase : { ...PROMISE_GROUP.open, tone: "gray" }} count={count} />
+    <PanelHead id="ext-h" title="Waiting on others and upcoming commitments" spec={blockers.length ? MOVE_KIND.chase : { ...PROMISE_GROUP.open, tone: "gray" }} count={count}
+      actions={<a className="panel-link" href={routeLink("cleanup", { bucket: "overdue_promises" })}>Clean up overdue promises</a>} />
     {!count ? <Text c="dimmed" className="panel-empty">No external blockers or commitments due soon.</Text> : <ul className="plan-list">
       {blockers.map((b, i) => <PlanRow key={`b${i}`} tone="red" lead={<StatusTile spec={MOVE_KIND.chase} />} title={b.text}
         sub={<span className="plan-row-meta"><span className="plan-kind tone-red">Waiting on {OWNER_LABEL[b.owner].toLowerCase()}</span><span>{b.projectName}</span></span>} />)}

@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
-import { registerRequestGuard, localBrowserOrigins, CSRF_HEADER, CSRF_PATH, GUARDED_BODY_LIMIT } from "../src/server/request-guard.ts";
+import { registerRequestGuard, localBrowserOrigins, CSRF_HEADER, CSRF_PATH, GUARDED_BODY_LIMIT, UPLOAD_BODY_LIMIT } from "../src/server/request-guard.ts";
 import { buildServer } from "../src/server/index.ts";
 import { sourcePaths } from "../src/shared/paths.ts";
 import { tempDir } from "./helpers.ts";
@@ -26,6 +26,8 @@ function fixture(origins = localBrowserOrigins(4317)) {
   app.post("/api/providers/failure", async () => { throw new Error("SYNTHETIC_PROVIDER_SECRET"); });
   app.post("/api/providers/small", { bodyLimit: 16 }, async () => { handled++; return { ok: true }; });
   app.post("/api/providers/large", { bodyLimit: 1024 * 1024 }, async () => { handled++; return { ok: true }; });
+  app.post("/api/files", { config: { upload: true } }, async (req) => { handled++; return { bytes: Buffer.isBuffer(req.body) ? req.body.length : -1 }; });
+  app.post("/api/voice/upload-lookalike", { config: { upload: false }, bodyLimit: UPLOAD_BODY_LIMIT }, async () => { handled++; return { ok: true }; });
   app.register(async (child) => {
     child.post("/:id/delivery/generate", async () => { handled++; return { ok: true }; });
   }, { prefix: "/api/projects" });
@@ -197,5 +199,42 @@ describe("local provider/planning request boundary", () => {
     const csrf = await token(app);
     expect((await app.inject({ method: "POST", url: "/api/projects/fixture/delivery/probe", headers: { host, origin }, payload: {} })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/api/projects/fixture/delivery/probe", headers: headers(csrf), payload: {} })).statusCode).toBe(200);
+  });
+
+  it("accepts raw bytes only on routes flagged as uploads, with every other check intact", async () => {
+    const { app, handled } = fixture(), csrf = await token(app);
+    const raw = { ...headers(csrf), "content-type": "application/octet-stream" };
+    const ok = await app.inject({ method: "POST", url: "/api/files", headers: raw, payload: Buffer.alloc(GUARDED_BODY_LIMIT * 2) });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ bytes: GUARDED_BODY_LIMIT * 2 });
+    expect(handled()).toBe(1);
+    for (const bad of [{ [CSRF_HEADER]: "" }, { origin: "https://evil.example" }, { host: "evil.example:4317" }, { "sec-fetch-site": "cross-site" }]) {
+      expect((await app.inject({ method: "POST", url: "/api/files", headers: { ...raw, ...bad }, payload: Buffer.from("x") })).statusCode).toBe(403);
+    }
+    expect((await app.inject({ method: "POST", url: "/api/files", headers: { ...raw, "content-encoding": "gzip" }, payload: Buffer.from("x") })).statusCode).toBe(415);
+    expect((await app.inject({ method: "POST", url: "/api/files", headers: headers(csrf), payload: {} })).statusCode).toBe(415);
+    const tooBig = await app.inject({ method: "POST", url: "/api/files", headers: raw, payload: Buffer.alloc(UPLOAD_BODY_LIMIT + 1) });
+    expect(tooBig.statusCode).toBe(413);
+    expect(tooBig.json()).toEqual({ error: "File is too large" });
+    for (const url of ["/api/providers/connect", "/api/voice/upload-lookalike"]) {
+      expect((await app.inject({ method: "POST", url, headers: raw, payload: Buffer.from("x") })).statusCode).toBe(415);
+      expect((await app.inject({ method: "POST", url, headers: headers(csrf), payload: JSON.stringify({ t: "x".repeat(GUARDED_BODY_LIMIT) }) })).statusCode).toBe(413);
+    }
+    expect(handled()).toBe(1);
+  });
+
+  it("guards the clean-up namespace: origin, CSRF, JSON only and the 64 KB ceiling", async () => {
+    const { app, handled } = fixture();
+    app.get("/api/triage/batches", async () => ({ batches: [] }));
+    app.post("/api/triage/apply", async () => { return { ok: true }; });
+    const csrf = await token(app);
+    expect((await app.inject({ url: "/api/triage/batches", headers: { host } })).statusCode).toBe(403);
+    expect((await app.inject({ url: "/api/triage/batches", headers: { host, origin } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: "/api/triage/apply", headers: { host, origin, "content-type": "application/json" }, payload: {} })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/triage/apply", headers: { ...headers(csrf), origin: "https://evil.example" }, payload: {} })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/triage/apply", headers: { ...headers(csrf), "content-type": "application/octet-stream" }, payload: Buffer.from("x") })).statusCode).toBe(415);
+    expect((await app.inject({ method: "POST", url: "/api/triage/apply", headers: headers(csrf), payload: JSON.stringify({ t: "x".repeat(GUARDED_BODY_LIMIT) }) })).statusCode).toBe(413);
+    expect((await app.inject({ method: "POST", url: "/api/triage/apply", headers: headers(csrf), payload: {} })).statusCode).toBe(200);
+    expect(handled()).toBe(0);
   });
 });

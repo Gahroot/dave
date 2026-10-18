@@ -27,7 +27,7 @@ const scored = (score: number, percentDone = 0): Partial<DeliveryProgress> => ({
 const row = (over: Partial<ProjectFocusRow>): ProjectFocusRow => ({
   projectId: "p", projectName: "P", stage: "building", outcome: null, outcomeBasis: null, objective: null, readinessReached: null,
   counts: { requirements: 0, milestonesDone: 0, milestonesTotal: 0, openBlockers: 0, pendingProposals: 0 }, nextCommitment: null,
-  freshness: "fresh", lastReconciledAt: null, delivery: progress(), nextMove: null, ...over,
+  freshness: "fresh", lastReconciledAt: null, delivery: progress(), nextMove: null, paidWhen: null, priority: null, ...over,
 });
 const proposal = (over: Partial<Proposal>): Proposal => ({
   id: "x", projectId: "p", projectName: "P", kind: "scope_change", material: false, summary: "s", detail: null, itemId: null, patch: {},
