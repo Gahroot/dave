@@ -1,3 +1,5 @@
+import type { Strength, StrengthSource } from './obligation.ts';
+
 /**
  * Meeting types shared by the server and the UI. Type-only: no Node imports,
  * so the browser bundle can use them.
@@ -95,6 +97,12 @@ export type MeetingItem = {
   statusChangedAt: string | null;
   edited: boolean;
   agentRunId: string | null;
+  /** Effective strength: the stored one, else the rule (legacy rows). Only firm items are promises, asks or decisions. */
+  strength: Strength;
+  /** Who set the stored strength; null for a legacy row classified on read. 'user' always wins. */
+  strengthSource: StrengthSource | null;
+  /** The concrete thing handed over (commitments, meetings-v2), at most 200 characters. */
+  deliverable: string | null;
   createdAt: string;
   updatedAt: string;
   meetingTitle: string;

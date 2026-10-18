@@ -39,10 +39,10 @@ function honestModel(extra: (p: Payload) => Record<string, unknown> = () => ({})
     const firstWords = (text: string): string => text.split(' ').slice(0, 8).join(' ');
     return JSON.stringify({
       summary: { headline: p.part ? `Part ${p.part.slice(0, 1)}` : 'Export timeouts and API docs', overview: 'Client reports slow exports.', direction: ['Ship the archive filter next release', ...(p.part ? [`Direction ${p.part.slice(0, 1)}`] : [])] },
-      my_commitments: lines.filter(l => l.role === 'me' && l.text.includes("I'll")).map(l => ({ text: 'Send the API docs', due_phrase: 'by Friday', due_date: '2026-10-02', project: 'P1', quote: firstWords(l.text), turn: l.turn })),
-      client_suggestions: lines.filter(l => l.role === 'client' && l.text.includes('filter')).map(l => ({ text: 'Filter archived invoices', project: 'P1', quote: firstWords(l.text), turn: l.turn })),
+      my_commitments: lines.filter(l => l.role === 'me' && l.text.includes("I'll")).map(l => ({ text: 'Send the API docs', strength: 'firm', deliverable: 'API docs', owed_to: 'client', due_phrase: 'by Friday', due_date: '2026-10-02', project: 'P1', quote: firstWords(l.text), turn: l.turn })),
+      client_suggestions: lines.filter(l => l.role === 'client' && l.text.includes('filter')).map(l => ({ text: 'Filter archived invoices', strength: 'idea', project: 'P1', quote: firstWords(l.text), turn: l.turn })),
       client_pain_points: lines.filter(l => l.role === 'client' && l.text.includes('timing out')).map(l => ({ text: 'Full-year export times out', project: 'P1', quote: firstWords(l.text), turn: l.turn, feature_idea: { title: 'Background export', outcome: 'Full-year exports finish', acceptance: ['A full-year export completes', 'The client gets a download link'] } })),
-      decisions: lines.filter(l => l.text.startsWith('Agreed')).map(l => ({ text: 'Archive filter ships next release', project: null, quote: firstWords(l.text), turn: l.turn })),
+      decisions: lines.filter(l => l.text.startsWith('Agreed')).map(l => ({ text: 'Archive filter ships next release', strength: 'firm', project: null, quote: firstWords(l.text), turn: l.turn })),
       status_updates: [],
       ...extra(p),
     });
@@ -92,11 +92,13 @@ describe('meeting analysis', () => {
 
     const detail = store.detail('100', instructionsHash('Track design feedback too.'));
     expect(detail).toMatchObject({ status: 'analyzed', projectId: 'p-acme', projectSource: 'model', staleInstructions: false, model: 'gpt-6-astra',
-      summary: { headline: 'Export timeouts and API docs' }, counts: { commitment: 1, suggestion: 1, pain_point: 1, decision: 1 } });
+      summary: { headline: 'Export timeouts and API docs' }, counts: { commitment: 1, suggestion: 0, pain_point: 1, decision: 1 } });
+    // "It would be great to have a filter" is an idea: stored, but not counted as an ask.
+    expect(detail?.items.find(i => i.kind === 'suggestion')).toMatchObject({ strength: 'tentative', strengthSource: 'model' });
     const promise = detail?.items.find(i => i.kind === 'commitment');
     expect(promise?.quote).toBe("I'll send you the API docs by Friday");
     expect(promise).toMatchObject({ id: itemId('100', 'commitment', "i'll SEND you the api docs by friday"), speaker: 'Dave Owner', speakerRole: 'me', atSeconds: 90,
-      projectId: 'p-acme', projectSource: 'model', dueDate: '2026-10-02', status: 'open' });
+      projectId: 'p-acme', projectSource: 'model', dueDate: '2026-10-02', status: 'open', strength: 'firm', strengthSource: 'model', deliverable: 'API docs' });
     const decision = detail?.items.find(i => i.kind === 'decision');
     // No project from the model: the item inherits the meeting's project.
     expect(decision).toMatchObject({ projectId: 'p-acme', projectSource: 'meeting' });
@@ -121,6 +123,24 @@ describe('meeting analysis', () => {
     // Only the last three analyses are kept.
     for (let i = 0; i < 3; i++) await second.x.analyze('100', '', signal());
     expect(db.prepare('SELECT COUNT(*) AS n FROM meeting_extractions').get()).toMatchObject({ n: 3 });
+  });
+
+  it('keeps the strength you set through re-analysis, and keeps an idea you marked even when the model drops it', async () => {
+    importMeeting('100');
+    await extractor(honestModel()).x.analyze('100', '', signal());
+    const promise = store.items({ kinds: ['commitment'] })[0]!;
+    const idea = store.items({ kinds: ['suggestion'] })[0]!;
+    expect(promise).toMatchObject({ strength: 'firm', strengthSource: 'model' });
+    expect(idea).toMatchObject({ strength: 'tentative', strengthSource: 'model' });
+    expect(store.setStrength(promise.id, 'tentative', NOW.toISOString())).toBe(true);
+    expect(store.setStrength(idea.id, 'firm', NOW.toISOString())).toBe(true);
+    expect(store.setStrength('mi-unknown', 'firm', NOW.toISOString())).toBe(false);
+
+    // The model still reads the promise as firm, and no longer reports the idea at all.
+    await extractor(honestModel(() => ({ client_suggestions: [] }))).x.analyze('100', '', signal());
+    expect(store.item(promise.id)).toMatchObject({ strength: 'tentative', strengthSource: 'user' });
+    expect(store.item(idea.id)).toMatchObject({ strength: 'firm', strengthSource: 'user' });
+    expect(store.detail('100')?.counts).toMatchObject({ commitment: 0, suggestion: 1 });
   });
 
   it('repairs one unreadable answer, and fails after two', async () => {

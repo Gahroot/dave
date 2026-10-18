@@ -23,10 +23,16 @@ const ALLOWED_ARGV: readonly (readonly string[])[] = [
   ["log", "-10", "--format=%s"],
   // Dated subjects: meeting follow-up evidence ("was this promise worked on since the call?").
   ["log", "-30", "--format=%cI%x00%s"],
+  // Work watcher: has HEAD moved since the last poll?
+  ["rev-parse", "HEAD"],
+  // Work watcher: recent first-parent commits with sha, date, parents, subject and the DAVE-Objective trailer.
+  ["log", "-50", "--first-parent", "--format=%H%x00%cI%x00%P%x00%s%x00%(trailers:key=DAVE-Objective,valueonly,separator=%x2C)%x1e"],
 ];
 
 export const RECENT_SUBJECTS_ARGV = ALLOWED_ARGV[4]!;
 export const DATED_SUBJECTS_ARGV = ALLOWED_ARGV[5]!;
+export const HEAD_SHA_ARGV = ALLOWED_ARGV[6]!;
+export const WORK_LOG_ARGV = ALLOWED_ARGV[7]!;
 
 /** Flags prepended to every invocation: never take a lock, never read a pager. */
 const SAFE_PREFIX = ["--no-optional-locks", "--no-pager"];

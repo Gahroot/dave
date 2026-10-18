@@ -553,6 +553,19 @@ export function createMeetingService(db: Db, options: MeetingServiceOptions = {}
       return store.item(id) ?? item;
     },
 
+    /**
+     * The owner says an item is a promise ("firm") or only an idea ("tentative"). Re-analysis keeps the choice.
+     * onChanged reconciles the plan (an idea's commitment is withdrawn; a promoted one comes back) and rebuilds the Inbox.
+     */
+    setItemStrength(id: string, strength: unknown): MeetingItem {
+      const item = isItemId(id) ? store.item(id) : null;
+      if (!item) throw new MeetingError(404, 'Unknown item');
+      if (strength !== 'firm' && strength !== 'tentative') throw new MeetingError(400, 'Choose firm or tentative');
+      if (!store.setStrength(id, strength, now().toISOString())) throw new MeetingError(404, 'Unknown item');
+      changed();
+      return store.item(id) ?? item;
+    },
+
     /** Starts the 5-minute timer. Only the server entry point calls this, never tests. */
     startScheduler(): void {
       if (stopScheduler) return;

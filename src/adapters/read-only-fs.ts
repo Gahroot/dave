@@ -92,6 +92,20 @@ export const readOnlyFs = {
     }
   },
 
+  /** Reads at most the last `bytes` of a file (append-only logs). The first line may be partial. */
+  async readTail(p: string, bytes: number): Promise<string> {
+    const handle = await fs.open(await guard(p), "r");
+    try {
+      const { size } = await handle.stat();
+      const length = Math.max(0, Math.min(bytes, size));
+      const buf = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buf, 0, length, size - length);
+      return buf.subarray(0, bytesRead).toString("utf8");
+    } finally {
+      await handle.close();
+    }
+  },
+
   async stat(p: string): Promise<Stats | null> {
     try {
       return await fs.stat(await guard(p));

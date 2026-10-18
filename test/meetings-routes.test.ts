@@ -162,6 +162,11 @@ describe("meeting routes", () => {
     expect((await f.get("/api/meetings/items/mi-ffffffffffffffffffffffff/assignment")).statusCode).toBe(404);
     expect((await f.post("/api/meetings/items/mi-ffffffffffffffffffffffff/status", { action: "done" })).statusCode).toBe(404);
     expect((await f.post("/api/meetings/items/mi-ffffffffffffffffffffffff/status", {})).statusCode).toBe(400);
+    expect((await f.post("/api/meetings/items/mi-ffffffffffffffffffffffff/strength", { strength: "firm" })).statusCode).toBe(404);
+    expect((await f.post("/api/meetings/items/not-an-item/strength", { strength: "firm" })).statusCode).toBe(404);
+    expect((await f.post("/api/meetings/items/mi-ffffffffffffffffffffffff/strength", { strength: "firm", extra: 1 })).statusCode).toBe(400);
+    expect((await f.post("/api/meetings/items/mi-ffffffffffffffffffffffff/strength", {})).statusCode).toBe(400);
+    expect((await f.app.inject({ method: "POST", url: "/api/meetings/items/mi-ffffffffffffffffffffffff/strength", headers: f.headers, payload: { strength: "firm" } })).statusCode).toBe(403);
 
     expect((await f.post("/api/meetings/recordings/4242/forget", { extra: 1 })).statusCode).toBe(400);
     expect((await f.post("/api/meetings/recordings/4242/forget", {})).statusCode).toBe(200);

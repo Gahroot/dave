@@ -47,6 +47,13 @@ export const ITEM_KIND_LABELS: Record<MeetingItem["kind"], string> = {
   pain_point: "Client pain point",
   decision: "Decision",
 };
+/** Kind labels for tentative items (ideas), which must never read as promises or agreed decisions. */
+export const IDEA_KIND_LABELS: Record<MeetingItem["kind"], string> = {
+  commitment: "Something you might do",
+  suggestion: "Client suggestion",
+  pain_point: "Client pain point",
+  decision: "Option discussed",
+};
 
 export const ITEM_STATUS_LABELS: Record<MeetingItem["status"], string> = {
   open: "Open",
@@ -55,6 +62,25 @@ export const ITEM_STATUS_LABELS: Record<MeetingItem["status"], string> = {
   done: "Done",
   dropped: "Dropped",
 };
+
+/** Selective meetings: the heading for maybes and brainstormed ideas. They are kept, but never count as promises. */
+export const IDEAS_LABEL = "Ideas mentioned (not promises)";
+
+/** Firm items (promises, asks, agreed decisions) and ideas, each keeping its order. */
+export function splitByStrength<T extends Pick<MeetingItem, "strength">>(items: readonly T[]): { firm: T[]; ideas: T[] } {
+  return { firm: items.filter(i => i.strength !== "tentative"), ideas: items.filter(i => i.strength === "tentative") };
+}
+
+/** Only firm items: ideas never appear in promise or ask lists, or in counts. */
+export const firmOnly = <T extends Pick<MeetingItem, "strength">>(items: readonly T[]): T[] => splitByStrength(items).firm;
+
+/** "Oct 21". A date-only due date ("2026-10-21") is a local calendar day; Date.parse would read it as UTC midnight
+ * and show the day before anywhere west of UTC. Full timestamps are shown in local time. */
+export function shortDay(value: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(Date.parse(value));
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
 
 /** "1:35" or "1:02:03": where in the recording an item was said. */
 export function timestamp(seconds: number): string {

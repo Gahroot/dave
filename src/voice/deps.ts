@@ -12,6 +12,10 @@ export type VoiceIntel = Pick<IntelService,
 export type VoiceMeetings = {
   items(filter: { kinds: MeetingItemKind[]; statuses: MeetingItemStatus[] }): MeetingItem[];
   setItemStatus(id: string, action: unknown): MeetingItem;
+  /** Promise (firm) or just an idea (tentative); the user's choice survives re-analysis. */
+  setItemStrength(id: string, strength: "firm" | "tentative"): MeetingItem;
+  /** The latest analysed meetings, newest first, for scoping a clean-up by meeting title. */
+  recentMeetings(limit: number): { recordingId: string; title: string; at: string | null }[];
   syncNow(): unknown;
   /** Storage-free: Fathom was connected (settings), not a Keychain read. */
   fathomConnected(): boolean;

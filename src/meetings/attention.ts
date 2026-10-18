@@ -85,7 +85,8 @@ const fingerprint = (parts: readonly unknown[]): string => createHash('sha256').
 export function meetingCandidates(items: readonly MeetingItem[], projects: ReadonlyMap<string, Pick<PortfolioProject, 'name'> & ProjectActivity>, now: Date): AttentionCandidate[] {
   const out: AttentionCandidate[] = [];
   for (const item of items) {
-    if (!item.projectId || item.status !== 'open') continue;
+    // Ideas mentioned are not promises: they never reach the Inbox.
+    if (!item.projectId || item.status !== 'open' || item.strength === 'tentative') continue;
     const project = projects.get(item.projectId);
     if (!project) continue;
     const subjectKey = JSON.stringify(['meeting', item.id]);

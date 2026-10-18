@@ -176,7 +176,7 @@ export function createExtractor(deps: ExtractDeps) {
       const projects: PromptProject[] = catalog.map((p, i) => ({ handle: `P${i + 1}`, name: p.name, folder: path.basename(p.path), focus: p.focus }));
       const startedAt = meeting.startedAt ?? meeting.createdAt;
       const earlier = store.items({ kinds: ['commitment'], statuses: ['open', 'looks_done'] })
-        .filter(i => i.recordingId !== recordingId && Date.parse(i.meetingAt) < Date.parse(startedAt))
+        .filter(i => i.strength === 'firm' && i.recordingId !== recordingId && Date.parse(i.meetingAt) < Date.parse(startedAt))
         .slice(0, MAX_PROMISES);
       const promiseByHandle = new Map(earlier.map((c, i) => [`C${i + 1}`, c.id]));
       const promises: PromptPromise[] = earlier.map((c, i) => ({
@@ -198,6 +198,7 @@ export function createExtractor(deps: ExtractDeps) {
         projectHandles: new Set(projectByHandle.keys()),
         promiseHandles: new Set(promiseByHandle.keys()),
         meetingDate: meetingDate(startedAt),
+        requireStrength: true,
       };
 
       const systemBytes = Buffer.byteLength(system);
@@ -286,8 +287,8 @@ export function createExtractor(deps: ExtractDeps) {
           const projectSource = modelProject ? 'model' : meetingProject ? 'meeting' : null;
           // Re-analysis refreshes wording, time and project, but keeps what the owner changed.
           db.prepare(`INSERT INTO meeting_items(id, recording_id, extraction_id, kind, text, quote, at_seconds, speaker, speaker_role,
-              project_id, project_source, due_phrase, due_date, feature_json, status, status_source, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'open', 'model', ?, ?)
+              project_id, project_source, due_phrase, due_date, feature_json, status, status_source, strength, strength_source, deliverable, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'open', 'model', ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               extraction_id = excluded.extraction_id,
               quote = excluded.quote, at_seconds = excluded.at_seconds, speaker = excluded.speaker, speaker_role = excluded.speaker_role,
@@ -297,13 +298,17 @@ export function createExtractor(deps: ExtractDeps) {
               feature_json = CASE WHEN meeting_items.edited = 1 THEN meeting_items.feature_json ELSE excluded.feature_json END,
               project_id = CASE WHEN meeting_items.project_source = 'user' THEN meeting_items.project_id ELSE excluded.project_id END,
               project_source = CASE WHEN meeting_items.project_source = 'user' THEN 'user' ELSE excluded.project_source END,
+              strength = CASE WHEN meeting_items.strength_source = 'user' THEN meeting_items.strength ELSE excluded.strength END,
+              strength_source = CASE WHEN meeting_items.strength_source = 'user' THEN 'user' ELSE excluded.strength_source END,
+              deliverable = excluded.deliverable,
               updated_at = excluded.updated_at`)
             .run(id, recordingId, extractionId, item.kind, item.text.slice(0, 600), item.quote.slice(0, 400), item.at, item.speaker, item.role,
-              projectId, projectSource, item.duePhrase, item.dueDate, item.feature ? JSON.stringify(item.feature) : null, at, at);
+              projectId, projectSource, item.duePhrase, item.dueDate, item.feature ? JSON.stringify(item.feature) : null,
+              item.strength, item.strengthSource, item.deliverable, at, at);
         }
         // Items this analysis no longer finds go away, unless the owner already acted on them.
         db.prepare(`DELETE FROM meeting_items WHERE recording_id = ? AND extraction_id IS NOT ?
-            AND status = 'open' AND status_source = 'model' AND edited = 0 AND project_source IS NOT 'user' AND agent_run_id IS NULL`)
+            AND status = 'open' AND status_source = 'model' AND edited = 0 AND project_source IS NOT 'user' AND strength_source IS NOT 'user' AND agent_run_id IS NULL`)
           .run(recordingId, extractionId);
 
         // A later meeting only suggests that an earlier promise is settled; the owner confirms.

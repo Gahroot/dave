@@ -9,6 +9,7 @@ import { migrateDeliveryLeverage } from "./migrations/012-delivery-leverage.ts";
 import { migrateVoice } from "./migrations/013-voice.ts";
 import { migrateTriage } from "./migrations/014-triage.ts";
 import { migrateVoiceTheme } from "./migrations/015-voice-theme.ts";
+import { migrateClosedLoop } from "./migrations/016-closed-loop.ts";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -17,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const SCHEMA = fileURLToPath(new URL("./schema.sql", import.meta.url));
 
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 const ATTENTION = fileURLToPath(new URL("./migrations/004_attention.sql", import.meta.url));
 
 /**
@@ -75,6 +76,7 @@ export function openDb(appHome: string, beforeMigrationCommit?: (db: Db) => void
       if (previous < 13) migrateVoice(db);
       if (previous < 14) migrateTriage(db);
       if (previous < 15) migrateVoiceTheme(db);
+      if (previous < 16) migrateClosedLoop(db);
       if (previous !== SCHEMA_VERSION) {
         db.exec("DELETE FROM schema_meta");
         db.prepare("INSERT INTO schema_meta (version) VALUES (?)").run(SCHEMA_VERSION);

@@ -7,6 +7,7 @@
 import { IntelError } from "../intel/service.ts";
 import type { IntelItem, ItemKind, Lane, MarkableStep, Owner, ProjectIntel } from "../intel/types.ts";
 import type { DocumentService } from "../documents/types.ts";
+import type { MeetingItem } from "../meetings/types.ts";
 import type { AttentionAction } from "../shared/types.ts";
 import { routeLink } from "../ui/navigation.ts";
 import type { ActionCard, CardTone, ConfirmClickRequest, DataScope, DocumentMeta, ToolCallRequest, ToolCallResponse, UiDirective } from "./types.ts";
@@ -26,6 +27,7 @@ type Props = Record<string, Record<string, unknown>>;
 const str = (description: string, extra: Record<string, unknown> = {}) => ({ type: "string", description, ...extra });
 const PROJECT = str("Project name as the user said it (or its id from an earlier result). Optional when the user is looking at a project.");
 const ITEM = str("Item title as the user said it, or its id from an earlier result.");
+const MEETING = str("Meeting title as the user said it, to scope to one recent meeting.");
 const strList = (description: string, maxItems = 20) => ({ type: "array", items: { type: "string" }, maxItems, description });
 
 function def(name: string, description: string, props: Props = {}, required: string[] = []): ToolDefinition {
@@ -57,8 +59,9 @@ export const READ_TOOL_DEFS: readonly ToolDefinition[] = [
   def("finish_line_from_document", "Find deliverables and acceptance criteria in a shared contract or proposal, to offer them as the finish line.", { document: str("Document name or id.") }, ["document"]),
   def("voice_history", "Summaries of recent voice sessions."),
   def("prepare_ezcoder_tasks", "Put the project's ready EZcoder tasks on screen as a copy card. The task text is shown to the user only.", { project: PROJECT }),
-  def("find_noise", "Count the noise DAVE could clear: overdue or stale meeting promises, items that look done, old client asks and drafted decisions, with a few examples.", {
-    project: PROJECT, bucket: { type: "string", enum: [...TRIAGE_BUCKETS] }, text: str("Only items containing these words."),
+  def("find_noise", "Count the noise DAVE could clear: overdue or stale meeting promises, items that look done, old client asks, drafted decisions and ideas that never became promises, with counts per project and a few examples.", {
+    project: PROJECT, meeting: MEETING, bucket: { type: "string", enum: [...TRIAGE_BUCKETS] }, text: str("Only items containing these words."),
+    olderThanDays: { type: "integer", minimum: 0, maximum: 3650, description: "Only items from meetings at least this many days old." },
     includeConfirmed: { type: "boolean", description: "Also items the user already acted on." },
   }),
   def("refresh_everything", "Pull fresh updates: rescan projects, re-check delivery and sync meetings when connected. Slow; only when asked."),
@@ -81,11 +84,13 @@ export const WRITE_TOOL_DEFS: readonly ToolDefinition[] = [
   write("add_finish_line_items", "Add finish-line items (for example from a contract) and optional acceptance criteria.", { project: PROJECT, items: strList("Item titles."), acceptance: strList("Acceptance criteria.") }, ["items"]),
   write("inbox_action", "Handle, snooze to tomorrow or dismiss an Inbox item.", { item: str("Inbox item title or id."), action: { type: "string", enum: ["handled", "tomorrow", "dismiss"] } }, ["item", "action"]),
   write("meeting_item_action", "Set a meeting promise or ask to done, dropped or open, or answer a looks-done suggestion (confirm / not_yet).", { item: str("Item text or id."), action: { type: "string", enum: ["done", "dropped", "open", "confirm", "not_yet"] } }, ["item", "action"]),
+  write("promote_idea", "Turn a meeting idea (a maybe, not a promise) into a real promise, so it counts in the plan again.", { item: str("Idea text or id.") }, ["item"]),
+  write("demote_promise", "Mark a meeting promise as just an idea, so it stops counting as a promise.", { item: str("Promise text or id.") }, ["item"]),
   write("pin_project", "Pin or unpin a project so it stays in Active.", { project: PROJECT, pinned: { type: "boolean" } }, ["pinned"]),
   write("forget_note", "Delete a note DAVE remembers.", { note: str("Note text or id.") }, ["note"]),
   write("clean_up", "Clear (or mark done) noisy meeting promises, old client asks and drafted decisions in one go. Exactly the items matched when prepared are changed; every clean-up can be undone.", {
     buckets: { type: "array", items: { type: "string", enum: [...TRIAGE_BUCKETS] }, maxItems: TRIAGE_BUCKETS.length, description: "Which kinds of noise (from find_noise)." },
-    project: PROJECT, text: str("Only items whose title, project or meeting contains these words."),
+    project: PROJECT, meeting: MEETING, text: str("Only items whose title, project or meeting contains these words."),
     olderThanDays: { type: "integer", minimum: 0, maximum: 3650 }, overdueOnly: { type: "boolean" },
     includeConfirmed: { type: "boolean", description: "Also items the user already acted on. Off by default." },
     keys: strList("Exact item keys from find_noise.", 200), action: { type: "string", enum: ["clear", "done"], description: "clear (default) or done." },
@@ -226,33 +231,75 @@ export function createToolExecutor(deps: ToolDeps) {
   function optBool(a: Args, key: string): boolean | undefined { return a[key] === undefined ? undefined : bool(a, key); }
   /** Only an explicitly named project narrows a clean-up; the page's project does not. */
   const namedProject = (a: Args, ctx: Ctx) => a.project === undefined || a.project === null ? null : projectOf(a, ctx);
+  /** A spoken meeting title, matched among the latest 50 meetings. Ambiguous: ask which. None: say so. */
+  function meetingOf(a: Args): { id: string; name: string } | null {
+    const q = text(a, "meeting", 200);
+    if (!q) return null;
+    const r = resolveNamed(q, deps.meetings.recentMeetings(50).map((m) => ({ id: m.recordingId, name: m.title })));
+    if ("project" in r) return r.project;
+    if ("ambiguous" in r) throw new Refusal(`Which meeting: ${join(r.candidates.map((c) => sp(c, 80)))}?`, { ambiguous: true, candidates: r.candidates.map((c) => sp(c, 80)) });
+    throw new Refusal(`I couldn't find a recent meeting called ${sp(q, 80)}.`, { notFound: true });
+  }
+  function olderThan(a: Args): number | undefined {
+    const older = a.olderThanDays;
+    if (older === undefined) return undefined;
+    if (typeof older !== "number" || !Number.isInteger(older) || older < 0 || older > 3650) throw new Refusal("olderThanDays should be a whole number of days.");
+    return older;
+  }
+  /** Counts per project, largest first, then by name. */
+  function perProject(entries: readonly { projectName: string | null }[]): { project: string; count: number }[] {
+    const m = new Map<string, number>();
+    for (const e of entries) { const k = e.projectName ? sp(e.projectName, 60) : "No project"; m.set(k, (m.get(k) ?? 0) + 1); }
+    return [...m].map(([project, count]) => ({ project, count })).sort((x, y) => y.count - x.count || x.project.localeCompare(y.project));
+  }
+  function strengthOf(i: MeetingItem): "firm" | "tentative" | null {
+    if (!("strength" in i)) return null;
+    return i.strength === "firm" || i.strength === "tentative" ? i.strength : null;
+  }
+  function setStrength(a: Args, to: "firm" | "tentative"): Prepared {
+    const q = text(a, "item", 300, true);
+    const all = deps.meetings.items({ kinds: ["commitment", "suggestion", "pain_point", "decision"], statuses: ["open", "planned", "looks_done"] });
+    const items = all.filter((i) => strengthOf(i) !== to);
+    const r = resolveNamed(q, items.map((i) => ({ id: i.id, name: i.text })));
+    if ("ambiguous" in r) throw new Refusal(`Which one: ${join(r.candidates.map((c) => sp(c, 80)))}?`, { ambiguous: true });
+    if ("none" in r) throw new Refusal(to === "firm" ? "I couldn't find that idea in your meetings." : "I couldn't find that promise in your meetings.", { notFound: true });
+    const it = r.project;
+    const verb = to === "firm" ? "Make this a promise" : "Mark this as just an idea";
+    return confirm(to === "firm" ? "Promote idea" : "Demote promise", `${verb}: ${it.name}.`, [it.name], () => {
+      deps.meetings.setItemStrength(it.id, to);
+      return done(to === "firm" ? `It's a promise now: ${it.name}.` : `Now just an idea: ${it.name}.`, ["meetings", "intel", "portfolio"], to === "firm" ? "Promoted to a promise" : "Marked as an idea");
+    });
+  }
 
   const handlers: Record<string, (a: Args, ctx: Ctx) => Promise<Result> | Result> = {
     find_noise: (a, ctx) => {
       const p = namedProject(a, ctx);
+      const m = meetingOf(a);
       const bucket = a.bucket === undefined ? undefined : oneOf(a, "bucket", TRIAGE_BUCKETS);
       const t = text(a, "text", 200);
+      const older = olderThan(a);
       const inc = optBool(a, "includeConfirmed");
-      const filter: TriageFilter = { ...(p ? { projectId: p.id } : {}), ...(bucket ? { buckets: [bucket] } : {}), ...(t ? { text: t } : {}), ...(inc !== undefined ? { includeConfirmed: inc } : {}) };
+      const filter: TriageFilter = { ...(p ? { projectId: p.id } : {}), ...(m ? { recordingId: m.id } : {}), ...(bucket ? { buckets: [bucket] } : {}), ...(t ? { text: t } : {}),
+        ...(older !== undefined ? { olderThanDays: older } : {}), ...(inc !== undefined ? { includeConfirmed: inc } : {}) };
       const pv = deps.triage.preview(filter);
       const counts = TRIAGE_BUCKETS.filter((b) => pv.counts[b] > 0).map((b) => ({ bucket: b, label: BUCKET_LABEL[b], count: pv.counts[b] }));
       const samples = pv.entries.slice(0, 15).map((e) => ({ key: e.key, title: sp(e.title, 160), project: e.projectName ? sp(e.projectName, 60) : null, reason: sp(e.reasons[0] ?? BUCKET_LABEL[e.bucket], 120) }));
-      return read({ total: pv.total, counts, samples, confirmedHidden: pv.confirmedHidden, hint: pv.total > 0 ? "Offer to clear them in one go." : "Nothing noisy to clear." },
+      return read({ total: pv.total, counts, byProject: perProject(pv.entries), ...(m ? { meeting: sp(m.name, 80) } : {}), samples, confirmedHidden: pv.confirmedHidden, hint: pv.total > 0 ? "Offer to clear them in one go." : "Nothing noisy to clear." },
         pv.total > 0 ? `${pv.total} item${pv.total === 1 ? "" : "s"} to clean up` : "Nothing to clean up", pv.total > 0 ? "amber" : "gray");
     },
     clean_up: (a, ctx) => {
       const p = namedProject(a, ctx);
+      const m = meetingOf(a);
       const buckets = bucketList(a);
       const t = text(a, "text", 200);
-      const older = a.olderThanDays;
-      if (older !== undefined && (typeof older !== "number" || !Number.isInteger(older) || older < 0 || older > 3650)) throw new Refusal("olderThanDays should be a whole number of days.");
+      const older = olderThan(a);
       const overdue = optBool(a, "overdueOnly");
       const inc = optBool(a, "includeConfirmed");
       const keys = list(a, "keys", MAX_APPLY_KEYS, 200);
       if (keys && !keys.every((k) => TRIAGE_KEY.test(k))) throw new Refusal("Those item keys are not valid. Use the keys from find_noise.");
       const action = oneOf(a, "action", ["clear", "done"] as const, "clear");
       const filter: TriageFilter = {
-        ...(p ? { projectId: p.id } : {}), ...(buckets ? { buckets } : {}), ...(t ? { text: t } : {}), ...(typeof older === "number" ? { olderThanDays: older } : {}),
+        ...(p ? { projectId: p.id } : {}), ...(m ? { recordingId: m.id } : {}), ...(buckets ? { buckets } : {}), ...(t ? { text: t } : {}), ...(older !== undefined ? { olderThanDays: older } : {}),
         ...(overdue !== undefined ? { overdueOnly: overdue } : {}), ...(inc !== undefined ? { includeConfirmed: inc } : {}), ...(keys ? { keys } : {}),
       };
       const entries = deps.triage.preview(filter).entries.slice(0, MAX_APPLY_KEYS);
@@ -264,7 +311,9 @@ export function createToolExecutor(deps: ToolDeps) {
       const title = action === "clear" ? `Clear ${noun}` : `Mark ${noun} done`;
       const details = entries.slice(0, 8).map((e) => e.projectName ? `${e.title} (${e.projectName})` : e.title);
       if (n > 8) details.push(`and ${n - 8} more`);
-      const say = `${action === "clear" ? "Clear" : "Mark done"} ${noun}${p ? ` for ${p.name}` : ""}, for example ${entries.slice(0, 2).map((e) => e.title).join(" and ")}. It can be undone.`;
+      const split = perProject(entries);
+      const across = split.length > 1 ? ` across ${split.slice(0, 4).map((x) => `${x.count} in ${x.project}`).join(", ")}` : "";
+      const say = `${action === "clear" ? "Clear" : "Mark done"} ${noun}${p ? ` for ${p.name}` : ""}${m ? ` from ${m.name}` : ""}${across}, for example ${entries.slice(0, 2).map((e) => e.title).join(" and ")}. It can be undone.`;
       const c = confirm(title, say, [], () => {
         const r = deps.triage.apply({ keys: frozen, action, source: "voice" });
         if (r.batchId === null) return failure(r.summary || "Nothing was changed.", "failed");
@@ -585,6 +634,8 @@ export function createToolExecutor(deps: ToolDeps) {
         return done(`${verb}: ${it.name}.`, ["meetings", "portfolio"], "Meeting item updated");
       });
     },
+    promote_idea: (a) => setStrength(a, "firm"),
+    demote_promise: (a) => setStrength(a, "tentative"),
     pin_project: (a, ctx) => {
       const p = projectOf(a, ctx);
       const pinned = bool(a, "pinned");

@@ -1,5 +1,10 @@
 import type { SpeakerRole, Turn } from './transcript.ts';
 import type { FeatureIdea, ItemKind, MeetingSummary } from './types.ts';
+import { classifyObligation, combineStrength, type Strength } from './obligation.ts';
+
+export const MAX_DELIVERABLE_CHARS = 200;
+export type OwedTo = 'client' | 'teammate' | 'unknown';
+const OWED_TO: readonly OwedTo[] = ['client', 'teammate', 'unknown'];
 
 /** The prompt asks for 30 words; the check leaves a little room so a real promise is not lost. */
 export const MAX_QUOTE_WORDS_ACCEPTED = 40;
@@ -23,6 +28,12 @@ export type ExtractedItem = {
   duePhrase: string | null;
   dueDate: string | null;
   feature: FeatureIdea | null;
+  /** combineStrength(model, rule). */
+  strength: Strength;
+  /** 'model' when the answer gave a strength, 'rule' when only the rule decided (a pre-v2 answer). */
+  strengthSource: 'model' | 'rule';
+  deliverable: string | null;
+  owedTo: OwedTo | null;
 };
 
 export type StatusUpdate = { commitment: string; status: 'done' | 'dropped'; quote: string; turn: number; at: number; speaker: string };
@@ -47,6 +58,8 @@ export type VerifyContext = {
   promiseHandles: ReadonlySet<string>;
   /** YYYY-MM-DD of the meeting; due dates must fall within the following year. */
   meetingDate: string;
+  /** meetings-v2 answers: commitments must carry strength, deliverable and owed_to. Off for legacy answers. */
+  requireStrength?: boolean;
 };
 
 export type ParseResult = { ok: true; value: ParsedExtraction } | { ok: false; error: 'invalid_json' | 'invalid_shape' };
@@ -163,6 +176,14 @@ function parseSummary(value: unknown): MeetingSummary | null {
   return { headline, overview, direction };
 }
 
+/** The model's strength in the item's own words (suggestions: request/idea), null when absent, 'invalid' otherwise. */
+function parseStrength(kind: ItemKind, value: unknown): Strength | null | 'invalid' {
+  if (value === undefined || value === null) return null;
+  if (kind === 'suggestion') return value === 'request' ? 'firm' : value === 'idea' ? 'tentative' : 'invalid';
+  if (kind === 'commitment' || kind === 'decision') return value === 'firm' || value === 'tentative' ? value : 'invalid';
+  return 'invalid';
+}
+
 function stripFences(raw: string): string {
   const trimmed = raw.trim();
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
@@ -188,8 +209,23 @@ export function parseExtraction(raw: string, ctx: VerifyContext): ParseResult {
 
   for (const [key, kind] of LISTS) {
     for (const raw of body[key] as unknown[]) {
-      const optional = ['project', ...(kind === 'pain_point' ? ['feature_idea'] : kind === 'commitment' ? ['due_phrase', 'due_date'] : [])];
-      if (!isObj(raw) || !hasOnly(raw, ['text', 'quote', 'turn'], optional)) { dropped.invalid++; continue; }
+      const v2 = kind === 'commitment' ? ['strength', 'deliverable', 'owed_to'] : kind === 'suggestion' || kind === 'decision' ? ['strength'] : [];
+      const required = ['text', 'quote', 'turn', ...(ctx.requireStrength && kind === 'commitment' ? v2 : [])];
+      const optional = ['project', ...v2, ...(kind === 'pain_point' ? ['feature_idea'] : kind === 'commitment' ? ['due_phrase', 'due_date'] : [])];
+      if (!isObj(raw) || !hasOnly(raw, required, optional)) { dropped.invalid++; continue; }
+      const modelStrength = parseStrength(kind, raw.strength);
+      if (modelStrength === 'invalid') { dropped.invalid++; continue; }
+      let deliverable: string | null = null;
+      if (raw.deliverable !== null && raw.deliverable !== undefined) {
+        deliverable = clipped(raw.deliverable, MAX_DELIVERABLE_CHARS);
+        if (!deliverable) { dropped.invalid++; continue; }
+      }
+      let owedTo: OwedTo | null = null;
+      if (raw.owed_to !== null && raw.owed_to !== undefined) {
+        const found = OWED_TO.find(o => o === raw.owed_to);
+        if (!found) { dropped.invalid++; continue; }
+        owedTo = found;
+      }
       const itemText = text(raw.text, MAX_ITEM_TEXT);
       const quote = text(raw.quote, 2000);
       const turn = turnHandle(raw.turn);
@@ -225,7 +261,11 @@ export function parseExtraction(raw: string, ctx: VerifyContext): ParseResult {
         else feature = parsed;
       }
       seen.add(key2);
-      items.push({ kind, text: itemText, quote, turn: found.index, at: found.at, speaker: found.speaker, role: found.role, project, duePhrase, dueDate, feature });
+      const strength = combineStrength(modelStrength, classifyObligation({ kind, text: itemText, quote }));
+      items.push({
+        kind, text: itemText, quote, turn: found.index, at: found.at, speaker: found.speaker, role: found.role, project, duePhrase, dueDate, feature,
+        strength, strengthSource: modelStrength === null ? 'rule' : 'model', deliverable, owedTo,
+      });
     }
   }
 

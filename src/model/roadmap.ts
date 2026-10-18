@@ -60,6 +60,8 @@ export function buildRoadmap(input: { projectId: string; projectName: string; st
     ...(plan?.milestones.flatMap(m => [m.title, m.outcome, ...m.scope, ...m.acceptance]) ?? [])].join(" \n ");
   const planAt = plan ? Date.parse(plan.createdAt) : Number.NaN;
   const gaps: RoadmapGap[] = input.items
+    // Ideas mentioned (tentative) are not promises or asks.
+    .filter(i => i.strength !== "tentative")
     .filter(i => (i.kind === "commitment" || i.kind === "pain_point" || i.kind === "suggestion") && (i.status === "open" || i.status === "planned" || i.status === "looks_done"))
     .filter(i => i.status !== "looks_done" && coverage(`${i.text} ${i.feature ? `${i.feature.title} ${i.feature.outcome}` : ""}`.trim(), covering) < COVERED_AT)
     .map((i): RoadmapGap => {

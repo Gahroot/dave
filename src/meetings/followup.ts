@@ -122,7 +122,7 @@ export function createFollowup(deps: FollowupDeps) {
     for (const project of deps.projects()) {
       if (signal.aborted || !deps.allowed()) { interrupted = true; break; }
       if (project.override.hidden || !project.exists) continue;
-      const open = deps.store.followupCandidates(project.id).slice(0, MAX_PROMISES);
+      const open = deps.store.followupCandidates(project.id).filter(c => c.item.strength === 'firm').slice(0, MAX_PROMISES);
       if (open.length === 0) continue;
       const since = open.map(o => o.item.meetingAt).sort()[0] ?? '';
       const evidence = await gatherEvidence(deps, project, since);

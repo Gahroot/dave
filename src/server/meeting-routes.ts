@@ -134,6 +134,13 @@ export function registerMeetingRoutes(app: FastifyInstance, service: MeetingServ
     return handle(reply, () => service.setItemStatus(req.params.id, action));
   });
 
+  /** The owner's call: a promise ("firm") or only an idea ("tentative"). Re-analysis keeps it. */
+  app.post<{ Params: Params }>("/api/meetings/items/:id/strength", async (req, reply) => {
+    strictObject(req.body, ["strength"]);
+    const { strength } = req.body;
+    return handle(reply, () => service.setItemStrength(req.params.id, strength));
+  });
+
   app.post<{ Params: Params }>("/api/meetings/recordings/:id/forget", async (req, reply) => {
     strictObject(req.body, []);
     return handle(reply, () => { service.forget(recording(req.params.id)); return { ok: true }; });

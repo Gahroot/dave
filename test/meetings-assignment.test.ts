@@ -7,7 +7,7 @@ const painPoint = (over: Partial<MeetingItem> = {}): MeetingItem => ({
   quote: 'The CSV export keeps timing out when we pick a full year', atSeconds: 62, speaker: 'Jane Client', speakerRole: 'client',
   projectId: 'p1', projectName: 'Acme', projectSource: 'model', duePhrase: null, dueDate: null,
   feature: { title: 'Background CSV export', outcome: 'Full-year exports finish and arrive as a download link', acceptance: ['A full-year export completes', 'The user gets a download link'] },
-  status: 'open', suggestedStatus: null, statusSource: 'model', statusNote: null, statusChangedAt: null, edited: false, agentRunId: null,
+  status: 'open', suggestedStatus: null, statusSource: 'model', statusNote: null, statusChangedAt: null, edited: false, agentRunId: null, strength: "firm", strengthSource: null, deliverable: null,
   createdAt: '2026-09-28T17:00:00.000Z', updatedAt: '2026-09-28T17:00:00.000Z',
   meetingTitle: 'Acme weekly', meetingAt: '2026-09-28T16:00:00.000Z', meetingUrl: null,
   ...over,

@@ -1,6 +1,7 @@
 import type { Db } from '../db/index.ts';
 import type { FathomMeeting, FathomTranscriptEntry } from './fathom-client.ts';
-import { DEFAULT_INSTRUCTIONS } from './prompt.ts';
+import { DEFAULT_INSTRUCTIONS, isLegacyDefaultInstructions } from './prompt.ts';
+import { effectiveStrength, type Strength, type StrengthSource } from './obligation.ts';
 import type {
   FeatureIdea, HistoryDays, ItemKind, ItemStatus, ItemStatusSource, MeetingAttendee, MeetingCounts, MeetingDetail,
   MeetingItem, MeetingRow, MeetingSettings, MeetingStatus, MeetingSummary, MeetingSyncState, ProjectRule, ProjectSource,
@@ -105,6 +106,9 @@ function mapStoredMeeting(r: Row): StoredMeeting {
 }
 
 export function mapItem(r: Row): MeetingItem {
+  const kind = String(r.kind) as ItemKind;
+  const stored: Strength | null = r.strength === 'firm' || r.strength === 'tentative' ? r.strength : null;
+  const source: StrengthSource | null = stored && (r.strength_source === 'model' || r.strength_source === 'rule' || r.strength_source === 'user') ? r.strength_source : null;
   return {
     id: String(r.id),
     recordingId: String(r.recording_id),
@@ -127,6 +131,9 @@ export function mapItem(r: Row): MeetingItem {
     statusChangedAt: str(r.status_changed_at),
     edited: r.edited === 1,
     agentRunId: str(r.agent_run_id),
+    strength: effectiveStrength({ strength: stored, kind, text: String(r.text), quote: String(r.quote) }),
+    strengthSource: source,
+    deliverable: str(r.deliverable),
     createdAt: String(r.created_at),
     updatedAt: String(r.updated_at),
     meetingTitle: String(r.meeting_title ?? ''),
@@ -162,12 +169,16 @@ export function meetingStore(db: Db) {
     const ids = rows.map(r => String(r.recording_id));
     const counts = new Map<string, MeetingCounts>();
     if (ids.length > 0) {
-      const countRows = db.prepare(`SELECT recording_id, kind, COUNT(*) AS n FROM meeting_items
-        WHERE recording_id IN (SELECT value FROM json_each(?)) GROUP BY recording_id, kind`).all(JSON.stringify(ids)) as Row[];
+      // Firm items only: ideas mentioned are not promises, asks or decisions.
+      const countRows = db.prepare(`SELECT recording_id, kind, text, quote, strength FROM meeting_items
+        WHERE recording_id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(ids)) as Row[];
       for (const c of countRows) {
+        const kind = String(c.kind) as ItemKind;
+        const stored = c.strength === 'firm' || c.strength === 'tentative' ? c.strength : null;
+        if (effectiveStrength({ strength: stored, kind, text: String(c.text), quote: String(c.quote) }) !== 'firm') continue;
         const key = String(c.recording_id);
         const entry = counts.get(key) ?? emptyCounts();
-        entry[String(c.kind) as ItemKind] = num(c.n);
+        entry[kind] += 1;
         counts.set(key, entry);
       }
     }
@@ -357,6 +368,8 @@ export function meetingStore(db: Db) {
     profile(): { id: number | null; source: 'default' | 'user'; instructions: string; createdAt: string | null } {
       const r = db.prepare('SELECT id, source, instructions, created_at FROM meeting_profiles ORDER BY id DESC LIMIT 1').get() as Row | undefined;
       if (!r) return { id: null, source: 'default', instructions: DEFAULT_INSTRUCTIONS, createdAt: null };
+      // The meetings-v1 default saved verbatim (an earlier reset, or a copy) reads as today's default.
+      if (isLegacyDefaultInstructions(String(r.instructions))) return { id: num(r.id), source: 'default', instructions: DEFAULT_INSTRUCTIONS, createdAt: str(r.created_at) };
       return { id: num(r.id), source: String(r.source) === 'user' ? 'user' : 'default', instructions: String(r.instructions), createdAt: str(r.created_at) };
     },
 
@@ -539,6 +552,12 @@ export function meetingStore(db: Db) {
       });
     },
 
+    /** The owner's call: a promise or only an idea. Re-analysis keeps it. False for an unknown item. */
+    setStrength(id: string, strength: Strength, at: string): boolean {
+      return Number(db.prepare("UPDATE meeting_items SET strength = ?, strength_source = 'user', updated_at = ? WHERE id = ?")
+        .run(strength, at, id).changes) > 0;
+    },
+
     /** Changes an item's status and records who changed it. Clears any pending suggestion. False for an unknown item. */
     setItemStatus(id: string, change: { status: ItemStatus; source: ItemStatusSource; note: string | null }, now: string): boolean {
       return Number(db.prepare(`UPDATE meeting_items SET status = ?, status_source = ?, status_note = ?, status_changed_at = ?, updated_at = ?,
@@ -630,7 +649,10 @@ export function meetingStore(db: Db) {
     followupCandidates(projectId: string): { item: MeetingItem; evidenceSeen: string | null; rejected: string[] }[] {
       return (db.prepare(`${ITEM_SELECT} WHERE i.kind = 'commitment' AND i.status = 'open' AND i.project_id = ?
           ORDER BY COALESCE(m.started_at, m.created_at) ASC, i.id ASC`).all(projectId) as Row[])
-        .map(r => ({ item: mapItem(r), evidenceSeen: str(r.evidence_seen), rejected: strings(r.rejected_evidence_json) }));
+        .map(r => ({ item: mapItem(r), row: r }))
+        // Ideas are not promises: never checked against work evidence.
+        .filter(({ item }) => item.strength === 'firm')
+        .map(({ item, row: r }) => ({ item, evidenceSeen: str(r.evidence_seen), rejected: strings(r.rejected_evidence_json) }));
     },
 
     /** Records which evidence a promise was checked against, so unchanged evidence is not sent again. */

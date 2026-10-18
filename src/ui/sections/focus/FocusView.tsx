@@ -13,12 +13,17 @@ import { Changes, Decisions, External, Sources } from "./FocusSections.tsx";
 import { ProjectIntelView } from "./ProjectIntelView.tsx";
 import { ErrorLine } from "./parts.tsx";
 import { useIntelResource } from "./useIntelResource.ts";
+import { PreparedNextPanel, usePreparedNext } from "../../components/NextBestAction.tsx";
+import { ProgressFeed } from "./ProgressFeed.tsx";
+import { RecommendationReview } from "./RecommendationReview.tsx";
 
 const errorText = (e: unknown) => e instanceof Error ? e.message : "Request failed. Retry.";
 
 /** Delivery Intelligence home: client projects most behind first, each with the one move that unblocks it. */
 export function FocusView({ paused }: { paused: boolean }) {
   const { data, setData, pending, applyPending, error, loading, reload } = useIntelResource((s) => intelApi.focus(s), "focus", paused);
+  // DAVE's prepared next action; acting on it (record ops only) can change decisions or steps, so Focus reloads after.
+  const prepared = usePreparedNext(paused, reload);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const lock = useRef(false);
@@ -42,12 +47,14 @@ export function FocusView({ paused }: { paused: boolean }) {
     {loading && !data && <Text role="status">Loading your projects…</Text>}
     {error && <ErrorLine message={data ? `Showing the last loaded information. ${error}` : error} onRetry={reload} />}
     {data && <>
+      {!isFirstRun(data) && <PreparedNextPanel next={prepared} />}
       {isFirstRun(data)
         ? <div className="app-panel"><EmptyState title="No projects read yet" action={refresh}>DAVE has not read your projects yet. Refresh to let DAVE draft a finish line for each project from meetings, git history and delivery plans. Nothing is applied until you confirm it.</EmptyState></div>
-        : <><Pulse state={data} /><ProjectOrder rows={data.projects} now={now} /></>}
+        : <><Pulse state={data} /><ProgressFeed /><ProjectOrder rows={data.projects} now={now} /></>}
       <Decisions decisions={sortDecisions(data.decisions)} busy={busy} now={now}
         onAct={(p, act, lane) => void run(`proposal:${p.id}`, () => act === "accept" ? intelApi.accept(p.id, undefined, lane) : intelApi.reject(p.id))} />
       <External state={data} now={now} />
+      <RecommendationReview />
       <SourcesAndChanges state={data} now={now} />
     </>}
   </Stack>;

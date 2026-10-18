@@ -15,6 +15,8 @@ import { reconcileProject, type IntelModelHook, type ReconcileInput, type Reconc
 import { deriveStage, projectOutcome, readinessWithSteps } from "./outcome.ts";
 import { computeGaps, prioritizeAll, type PrioritizeProject, type ProjectObjectives } from "./prioritize.ts";
 import { deliveryPlan, nextMoveText, proposalOrder, type DeliveryInput } from "./delivery.ts";
+import type { RecommendationSnapshot } from "./ledger-types.ts";
+import type { WorkEvidence } from "../work/types.ts";
 
 export class IntelError extends Error {
   readonly code: "invalid" | "not-found" | "conflict";
@@ -37,6 +39,13 @@ export type IntelServiceOptions = {
   intervalMs?: number;
   /** Called after rejecting a "Confirm commitment" decision, with its meeting item ids. Failures are ignored. */
   onCommitmentRejected?: (meetingItemIds: string[]) => void;
+  /** Linked work events for one project (the work watcher). Read during gather; failures mean "none". */
+  workEvidence?: (projectId: string) => WorkEvidence[];
+  /**
+   * Called inside the same transaction, right after the objectives are recorded, whenever DAVE re-ranks (reconcile,
+   * meeting change, human edit). The recommendation ledger observes through it. Failures are ignored.
+   */
+  onRecommendations?: (snapshot: RecommendationSnapshot) => void;
 };
 
 export type ItemFields = Partial<{
@@ -118,12 +127,14 @@ export function intelService(db: Db, options: IntelServiceOptions) {
       meetingList = [...seen.values()].sort((a, b) => b.at.localeCompare(a.at) || a.recordingId.localeCompare(b.recordingId));
     } catch { /* meetings unavailable: keep stored plan */ }
     const act = p?.activity;
+    let workEvents: WorkEvidence[] = [];
+    try { workEvents = options.workEvidence?.(id) ?? []; } catch { workEvents = []; }
     return {
       projectId: id, projectName: projectName(id), goal,
       summary: p ? { recentFocus: p.summary.recentFocus, completed: p.summary.completed, unfinished: p.summary.unfinished } : null,
       commits: act ? act.recentCommitSubjects.map((subject, i) => ({ subject, at: i === 0 ? act.lastCommitAt : null })) : [],
       tasks: (p?.tasks ?? []).map((t) => ({ id: t.id, title: t.title, status: t.status, summary: t.summary, updatedAt: t.updatedAt })),
-      meetingItems, meetings: meetingList, milestones, sources: sourceHealth(),
+      meetingItems, meetings: meetingList, milestones, sources: sourceHealth(), workEvents,
     };
   }
 
@@ -185,6 +196,13 @@ export function intelService(db: Db, options: IntelServiceOptions) {
     return { inputs, ...prioritizeAll(inputs, now()) };
   }
 
+  /** Records the objectives, then lets the ledger observe the same ranking. Call inside store.tx. */
+  function record(ranked: { byProject: Map<string, ProjectObjectives>; queue: Objective[] }, trigger: string): void {
+    recordObjectives(ranked.byProject, trigger);
+    if (!options.onRecommendations) return;
+    try { options.onRecommendations({ byProject: ranked.byProject, queue: ranked.queue, trigger, at: now().toISOString() }); } catch { /* the ledger never blocks a reconcile */ }
+  }
+
   /** Records why a recommendation changed; unchanged objectives write nothing. */
   function recordObjectives(byProject: Map<string, ProjectObjectives>, trigger: string): void {
     const at = now().toISOString();
@@ -210,15 +228,15 @@ export function intelService(db: Db, options: IntelServiceOptions) {
       if (options.hook) { try { extra = await options.hook.extraFacts(input); } catch { extra = []; } }
       reports.push(reconcileProject(store, input, now(), extra));
     }
-    const { byProject } = compute();
-    store.tx(() => recordObjectives(byProject, "reconcile"));
+    const ranked = compute();
+    store.tx(() => record(ranked, "reconcile"));
     return reports;
   }
   /** Synchronous variant for hooks that cannot await (meeting onChanged). Core rules are synchronous anyway. */
   function reconcileSync(projectId?: string): ReconcileReport[] {
     const reports = (projectId ? [projectId] : projectIds()).map((id) => reconcileProject(store, gather(id), now()));
-    const { byProject } = compute();
-    store.tx(() => recordObjectives(byProject, "meeting change"));
+    const ranked = compute();
+    store.tx(() => record(ranked, "meeting change"));
     return reports;
   }
 
@@ -292,7 +310,7 @@ export function intelService(db: Db, options: IntelServiceOptions) {
   // ---- human control -------------------------------------------------------------------------------------
 
   const humanProv = (label: string) => ({ sourceKind: "human" as const, sourceId: null, label, quote: null, observedAt: now().toISOString(), confidence: "high" as const, link: null });
-  const refresh = (projectId: string, trigger: string): void => { store.tx(() => recordObjectives(compute().byProject, trigger)); void projectId; };
+  const refresh = (projectId: string, trigger: string): void => { const ranked = compute(); store.tx(() => record(ranked, trigger)); void projectId; };
   /** Real progress is you verifying: becoming verified stamps the moment, leaving verified clears it. */
   const stampVerified = (before: IntelItem, next: IntelItem, at: string): void => {
     if (next.evidenceState !== "verified") next.verifiedAt = null;
@@ -391,26 +409,49 @@ export function intelService(db: Db, options: IntelServiceOptions) {
     detail: (v) => v === null || typeof v === "string", acceptance: (v) => Array.isArray(v) && v.every((x) => typeof x === "string"),
   };
 
-  function resolveProposal(id: string, accept: boolean, note: string | null, lane?: Lane): FocusState {
+  /** Checks one proposal can be resolved; throws IntelError otherwise. */
+  function pendingProposal(id: string, accept: boolean, lane?: Lane): Proposal {
     const p = store.proposal(id);
     if (!p) throw new IntelError("not-found", "Unknown proposal");
     if (lane !== undefined && (!accept || p.kind !== "new_requirement" || !LANES.includes(lane))) throw new IntelError("invalid", "A lane can only be chosen when accepting a new requirement");
     if (p.status !== "pending") throw new IntelError("conflict", "Proposal already resolved");
-    const at = now().toISOString();
-    store.tx(() => {
-      if (accept) apply(p, at, lane ?? null);
-      else if (p.kind === "new_commitment" && p.itemId) {
-        const it = store.item(p.itemId);
-        if (it && it.basis === "inferred" && !it.locked) store.updateItem({ ...it, status: "dropped", updatedAt: at });
-      }
-      store.resolveProposal(id, accept ? "accepted" : "rejected", note, at);
-      store.addChange({ projectId: p.projectId, kind: "proposal_resolved", summary: `${accept ? "Accepted" : "Rejected"}: ${p.summary}${note ? ` (${note})` : ""}`, itemId: p.itemId, sources: ["human"] }, at);
-    });
+    return p;
+  }
+  /** The write for one proposal. Call inside store.tx. */
+  function resolveOne(p: Proposal, accept: boolean, note: string | null, at: string, lane?: Lane): void {
+    if (accept) apply(p, at, lane ?? null);
+    else if (p.kind === "new_commitment" && p.itemId) {
+      const it = store.item(p.itemId);
+      if (it && it.basis === "inferred" && !it.locked) store.updateItem({ ...it, status: "dropped", updatedAt: at });
+    }
+    store.resolveProposal(p.id, accept ? "accepted" : "rejected", note, at);
+    store.addChange({ projectId: p.projectId, kind: "proposal_resolved", summary: `${accept ? "Accepted" : "Rejected"}: ${p.summary}${note ? ` (${note})` : ""}`, itemId: p.itemId, sources: ["human"] }, at);
+  }
+  function afterReject(p: Proposal, accept: boolean): void {
     if (!accept && p.kind === "new_commitment") {
       const ids = p.provenance.filter((x) => x.sourceKind === "meeting" && x.sourceId !== null).map((x) => String(x.sourceId));
       try { if (ids.length) options.onCommitmentRejected?.(ids); } catch { /* the reject already happened */ }
     }
+  }
+
+  function resolveProposal(id: string, accept: boolean, note: string | null, lane?: Lane): FocusState {
+    const p = pendingProposal(id, accept, lane);
+    const at = now().toISOString();
+    store.tx(() => resolveOne(p, accept, note, at, lane));
+    afterReject(p, accept);
     refresh(p.projectId, `proposal ${accept ? "accepted" : "rejected"}`);
+    return focus();
+  }
+
+  /** Resolves several proposals in one transaction: all of them, or none when any is unknown or already resolved. */
+  function resolveProposals(ids: string[], accept: boolean, note: string | null): FocusState {
+    const unique = [...new Set(ids)].sort();
+    if (!unique.length) throw new IntelError("invalid", "No proposals given");
+    const ps = unique.map((id) => pendingProposal(id, accept));
+    const at = now().toISOString();
+    store.tx(() => { for (const p of ps) resolveOne(p, accept, note, at); });
+    for (const p of ps) afterReject(p, accept);
+    refresh(ps[0]?.projectId ?? "", `${ps.length} proposals ${accept ? "accepted" : "rejected"}`);
     return focus();
   }
 
@@ -674,7 +715,7 @@ export function intelService(db: Db, options: IntelServiceOptions) {
   function close(): void { if (timer) { clearInterval(timer); timer = null; } }
 
   return {
-    store, reconcile, reconcileSync, focus, projectIntel, putOutcome, addItem, patchItem, resolveProposal, brief, objectiveExists, knownProject, startScheduler, close, sourceHealth, gather,
+    store, reconcile, reconcileSync, focus, projectIntel, putOutcome, addItem, patchItem, resolveProposal, resolveProposals, brief, objectiveExists, knownProject, startScheduler, close, sourceHealth, gather,
     deliveryInput, setSchedule, setStep, markDemo, markSent, verifyItem, reopenItem, addFinishLineItems,
     ...directionApi,
   };

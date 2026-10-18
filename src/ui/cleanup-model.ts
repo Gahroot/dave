@@ -58,6 +58,7 @@ const BUCKET_PHRASE: Record<TriageBucket, [string, string]> = {
   looks_done: ["item that looks done", "items that look done"],
   old_asks: ["old client ask", "old client asks"],
   meeting_decisions: ["drafted decision from meetings", "drafted decisions from meetings"],
+  ideas: ["idea that never became a promise", "ideas that never became promises"],
 };
 
 const list = (parts: string[]): string => parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;

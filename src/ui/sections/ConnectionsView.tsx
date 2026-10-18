@@ -1,10 +1,12 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Group, Modal, NativeSelect, Stack, Text, Title } from "@mantine/core";
+import { Alert, Button, Card, Group, Modal, NativeSelect, Stack, Switch, Text, Title } from "@mantine/core";
 import type { ProviderService } from "../../providers/index.ts";
 import { deliveryApi } from "../delivery-api.ts";
+import { workApi } from "../work-api.ts";
+import type { WorkSettingsView } from "../../work/types.ts";
 import { parseRoute } from "../navigation.ts";
 import { PageHeader } from "../components/WorkspacePrimitives.tsx";
-import { ArrowLeft, ArrowRight, Ban, CircleX, LoaderCircle, Plug, RefreshCw, RotateCcw, Unplug, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Ban, CircleX, GitMerge, LoaderCircle, Plug, RefreshCw, RotateCcw, Unplug, X } from "lucide-react";
 import { StatusIcon, StatusMark, StatusTile } from "../components/Status.tsx";
 import type { StatusSpec } from "../status.ts";
 
@@ -20,6 +22,26 @@ const providerMark = (state: string | undefined): StatusSpec => state && state i
 const FathomConnection = lazy(() => import("./FathomConnection.tsx").then(m => ({ default: m.FathomConnection })));
 
 type Status = ReturnType<ProviderService["status"]>;
+
+/** Opt-in: read-only `gh pr list` for merged pull requests. Off until you switch it on. */
+function GithubSwitch() {
+  const [view, setView] = useState<WorkSettingsView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => { const ac = new AbortController(); workApi.settings(ac.signal).then(v => { if (!ac.signal.aborted) setView(v); }).catch((e: unknown) => { if (!ac.signal.aborted) setError(e instanceof Error ? e.message : "Settings unavailable. Retry."); }); return () => ac.abort(); }, []);
+  const toggle = async (github: boolean) => {
+    setBusy(true); setError("");
+    try { setView(await workApi.setGithub(github)); } catch (e) { setError(e instanceof Error ? e.message : "Could not save. Retry."); } finally { setBusy(false); }
+  };
+  const health = view?.sources.find(s => s.source === "github");
+  return <Card withBorder radius="md" padding="md" className="connection-card" data-tone={view?.githubEnabled ? "green" : "gray"}><Stack gap="sm">
+    <Title order={3} className="connection-title"><StatusTile spec={{ tone: view?.githubEnabled ? "green" : "gray", icon: GitMerge, label: "" }} size={18} />GitHub</Title>
+    <Switch label="Check GitHub for merged pull requests (uses your gh sign-in)" checked={view?.githubEnabled ?? false} disabled={busy || !view} onChange={e => void toggle(e.currentTarget.checked)} />
+    <Text size="xs" c="dimmed">Every 10 minutes DAVE asks gh for recently merged pull requests in projects hosted on GitHub. It keeps only titles and a short summary, and never changes anything on GitHub.</Text>
+    {view?.githubEnabled && health?.state === "degraded" && <Text size="sm" c="orange">GitHub check needs attention: {health.detail}</Text>}
+    {error && <Alert color="red" role="alert">{error}</Alert>}
+  </Stack></Card>;
+}
 export function ConnectionsView() {
   const [status, setStatus] = useState<Status | null>(null);
   const [storage, setStorage] = useState("keychain");
@@ -65,6 +87,7 @@ export function ConnectionsView() {
       {pending && <Text size="sm" className="status-line"><StatusIcon spec={PROVIDER_STATE.connecting} />Waiting for your browser sign-in. You can cancel; Dave does not claim connection until sign-in succeeds.</Text>}
     </Stack></Card>
     <Suspense fallback={<Text role="status">Loading Fathom settings…</Text>}><FathomConnection /></Suspense>
+    <GithubSwitch />
     <Card withBorder radius="md" padding="md" className="connection-card" data-tone="gray"><Stack gap="sm"><Title order={3} className="connection-title"><StatusTile spec={{ tone: "gray", icon: Ban, label: "" }} size={18} />Anthropic / Claude subscription</Title><Text fw={600}>Status: {status?.claude.state ?? "loading"}</Text><Text size="sm" c="dimmed">Requested models: claude-fable-5-1, claude-opus-5.</Text><Text size="sm">{status?.claude.error ?? "Claude remains unavailable until verified official-runtime isolation is supported."}</Text><Text size="xs" c="dimmed">No Claude login or inference is started here. No Anthropic API-key fallback. Credentials and subscription billing remain owned by the official Claude application.</Text></Stack></Card>
     {!returnTo && <Button component="a" href="#projects" variant="subtle" color="dark" rightSection={<ArrowRight size={16} aria-hidden="true" />} className="inline-link-button">Choose project goal and planning model</Button>}
     <Modal opened={confirmDisconnect} onClose={() => setConfirmDisconnect(false)} title="Disconnect OpenAI?" centered>

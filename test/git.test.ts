@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { DATED_SUBJECTS_ARGV, datedCommitSubjects, DisallowedGitCommandError, gitAdapter, runGit } from "../src/adapters/git.ts";
+import { HEAD_SHA_ARGV, WORK_LOG_ARGV, DATED_SUBJECTS_ARGV, datedCommitSubjects, DisallowedGitCommandError, gitAdapter, runGit } from "../src/adapters/git.ts";
 import { tempDir } from "./helpers.ts";
 
 const repo = path.join(tempDir("pcc-git-"), "repo");
@@ -20,6 +20,14 @@ beforeAll(() => {
   git("commit", "-qm", "first commit");
 });
 
+describe("work watcher argv", () => {
+  it("allows exactly rev-parse HEAD and the fixed first-parent log", async () => {
+    expect(HEAD_SHA_ARGV).toEqual(["rev-parse", "HEAD"]);
+    expect((await runGit(repo, HEAD_SHA_ARGV)).trim()).toMatch(/^[a-f0-9]{40}$/);
+    expect(await runGit(repo, WORK_LOG_ARGV)).toContain("first commit");
+  });
+});
+
 describe("runGit allow-list", () => {
   const mutating = [
     ["commit", "-m", "x"],
@@ -34,6 +42,10 @@ describe("runGit allow-list", () => {
     // The meeting follow-up shape, but with a different count or format.
     ["log", "-31", "--format=%cI%x00%s"],
     ["log", "-30", "--format=%cI%x00%s%x00%b"],
+    // Work watcher shapes, but altered.
+    ["rev-parse", "HEAD~1"],
+    ["log", "-51", "--first-parent", "--format=%H%x00%cI%x00%P%x00%s%x00%(trailers:key=DAVE-Objective,valueonly,separator=%x2C)%x1e"],
+    ["log", "-50", "--format=%H%x00%cI%x00%P%x00%s%x00%(trailers:key=DAVE-Objective,valueonly,separator=%x2C)%x1e"],
   ];
 
   it.each(mutating)("refuses `git %s`", async (...argv) => {
