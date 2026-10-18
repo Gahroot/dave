@@ -57,8 +57,15 @@ describe("voice routes", () => {
     expect(s.availability.state).toBe("check_on_start");
     expect(s.disclosure).toContain("OpenAI");
     expect(auth.getCredentials).not.toHaveBeenCalled();
+    expect(s.settings.theme).toBe("dark");
     const saved = (await f.post("/api/voice/settings", { voice: "cedar", mode: "push_to_talk" })).json();
     expect(saved.settings).toMatchObject({ voice: "cedar", mode: "push_to_talk", model: "gpt-realtime-2.1" });
+    const themed = (await f.post("/api/voice/settings", { theme: "light" })).json();
+    expect(themed.settings).toMatchObject({ theme: "light", voice: "cedar", mode: "push_to_talk" });
+    expect((await f.get("/api/voice/status")).json().settings.theme).toBe("light");
+    expect((await f.post("/api/voice/settings", { theme: "neon" })).statusCode).toBe(400);
+    expect((await f.post("/api/voice/settings", { theme: 1 })).statusCode).toBe(400);
+    expect((await f.get("/api/voice/status")).json().settings.theme).toBe("light");
   });
 
   it("503 with a plain reason when not connected or reconnect is needed", async () => {

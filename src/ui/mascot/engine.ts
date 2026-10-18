@@ -42,7 +42,8 @@ export type DaveBody = {
   dots: Dot[];
   head: Spring2;
   squash: { s: number; v: number };
-  bulb: { x: number; v: number };
+  /** Top hat wobble: a spring the head's motion and pokes swing (tilt = x * HAT_SWAY radians). */
+  hat: { x: number; v: number };
   look: { x: number; y: number };
   saccade: { x: number; y: number; next: number };
   blink: { t: number; next: number; double: boolean };
@@ -96,7 +97,7 @@ function insideHead(c: number, r: number): boolean {
 export function createDaveBody(seed: number): DaveBody {
   const b: DaveBody = {
     rng: seed | 0, time: 0, mood: "idle", moodTime: 0, dots: [],
-    head: { x: 0, y: 0, vx: 0, vy: 0, ax: 0, ay: 0 }, squash: { s: 0, v: 0 }, bulb: { x: 0, v: 0 },
+    head: { x: 0, y: 0, vx: 0, vy: 0, ax: 0, ay: 0 }, squash: { s: 0, v: 0 }, hat: { x: 0, v: 0 },
     look: { x: 0, y: 0 }, saccade: { x: 0, y: 0, next: 0 }, blink: { t: -1, next: 0, double: false },
     inLevel: 0, outLevel: 0, eq: [], eqPhase: [], pokeT: 0, shakeT: 0, spin: { yaw: 0, v: 0 },
   };
@@ -122,7 +123,7 @@ function poke(b: DaveBody): void {
     d.vx += d.u * f;
     d.vy += d.v * f * 0.7;
   }
-  b.bulb.v += (rand(b) < 0.5 ? -1 : 1) * (8 + rand(b) * 6);
+  b.hat.v += (rand(b) < 0.5 ? -1 : 1) * (8 + rand(b) * 6);
 }
 
 function substep(b: DaveBody, h: number, input: DaveStepInput): void {
@@ -178,8 +179,8 @@ function substep(b: DaveBody, h: number, input: DaveStepInput): void {
   b.squash.v += (-200 * b.squash.s - 9 * b.squash.v) * h;
   b.squash.s += b.squash.v * h;
 
-  b.bulb.v += (-120 * b.bulb.x - 6 * b.bulb.v - hd.ax * 0.04) * h;
-  b.bulb.x += b.bulb.v * h;
+  b.hat.v += (-120 * b.hat.x - 6 * b.hat.v - hd.ax * 0.04) * h;
+  b.hat.x += b.hat.v * h;
 
   for (const d of b.dots) {
     d.vx += (-d.k * d.ox - 13 * d.vx - hd.ax * 0.025) * h;
@@ -246,7 +247,7 @@ export function mouthLevel(b: DaveBody): number {
 /** Remaining spring motion (poke wobble); ~0 when settled. */
 export function daveEnergy(b: DaveBody): number {
   const spinOff = b.spin.yaw - Math.round(b.spin.yaw / TAU) * TAU;
-  let e = Math.abs(b.squash.s) + Math.abs(b.squash.v) * 0.1 + Math.abs(b.bulb.x) + Math.abs(spinOff) + Math.abs(b.spin.v) * 0.1;
+  let e = Math.abs(b.squash.s) + Math.abs(b.squash.v) * 0.1 + Math.abs(b.hat.x) + Math.abs(spinOff) + Math.abs(b.spin.v) * 0.1;
   for (const d of b.dots) e = Math.max(e, Math.abs(d.ox) + Math.abs(d.oy) + (Math.abs(d.vx) + Math.abs(d.vy)) * 0.1);
   return e;
 }
@@ -359,7 +360,8 @@ function facePx(b: DaveBody, mood: DaveMood, c: number, r: number, t: number): P
   return best;
 }
 
-function bulbAlpha(b: DaveBody, mood: DaveMood, t: number): number {
+/** The hat band's LEDs: they glow with the mic while listening and pulse with each mood (the old antenna bulb). */
+function bandAlpha(b: DaveBody, mood: DaveMood, t: number): number {
   switch (mood) {
     case "listening": return 0.3 + 0.7 * b.inLevel;
     case "hearing": return 0.5 + 0.5 * b.inLevel;
@@ -382,6 +384,11 @@ const HA = 1;
 const HB = 0.88;
 const HC = 0.7;
 const CAM = 4.2;
+/** Head centre and ground shadow, as fractions of the canvas height: low enough to leave room for the top hat. */
+const HEAD_CY = 0.62;
+const SHADOW_CY = 0.955;
+/** One head unit in canvas heights. */
+const HEAD_SCALE = 0.34;
 /** The front grid covers this fraction of the head's x/y extent. */
 const FACE_S = 0.92;
 const UX = (HA * FACE_S) / 7.6;
@@ -394,6 +401,34 @@ const EAR_R = 0.26;
 export const DAVE_LOD_PX = 72;
 /** Yaw of the reduced-motion 3/4 view. */
 export const DAVE_STATIC_YAW = 0.3;
+
+// Top hat, in hat-local units (origin at the brim centre, +y down), tipped toward DAVE's left so its low edge
+// rests on the head. A poke tips it: it hops up and tilts, then settles.
+const HAT_X = 0.05;
+const HAT_Y = -HB - 0.012;
+const HAT_TILT = 0.07;
+const HAT_SWAY = 0.07;
+const BRIM_R = 0.58;
+const BRIM_T = 0.035;
+const BRIM_CURL = 0.035;
+const CROWN_R0 = 0.37;
+const CROWN_R1 = 0.4;
+const CROWN_H = 0.56;
+const BAND_H = 0.1;
+const HAT_RING = 32;
+const BAND_DOTS = 22;
+const FELT_ROWS = [0.21, 0.3, 0.39, 0.48] as const;
+const FELT_DOTS = 22;
+const TIP_LIFT = 0.07;
+const TIP_TILT = 0.12;
+// Monocle over DAVE's right eye (screen left), on a chain that hangs to the ear.
+const MONO_EYE = EYES[0];
+const MONO_R = 2.45;
+const MONO_LIFT = 0.05;
+const MONO_BEADS = 30;
+const CHAIN_BEADS = 10;
+const CHAIN_END = { x: -0.99, y: 0.14 } as const;
+const CHAIN_SAG = 0.2;
 
 export type DavePart = "front" | "side" | "back" | "ear";
 type ShellPt = { part: Exclude<DavePart, "front">; x: number; y: number; z: number; nx: number; ny: number; nz: number; ear: number };
@@ -470,7 +505,7 @@ function daveP(b: DaveBody, t: number, size: number): Pose {
   if (mood === "happy") lift -= Math.abs(Math.sin(t * 5.5)) * 0.05;
   if (mood === "idle") lift += Math.sin(t * 1.6) * 0.006;
   return {
-    yaw, pitch, roll, cx: size / 2, cy: size * (0.55 + lift), scale: size * 0.35,
+    yaw, pitch, roll, cx: size / 2, cy: size * (HEAD_CY + lift), scale: size * HEAD_SCALE,
     sx: 1 + b.squash.s * 0.06, sy: 1 - b.squash.s * 0.06,
   };
 }
@@ -539,8 +574,11 @@ function fillPoly(painter: DavePainter, pts: number[], fill: string, stroke: str
   painter.ellipse((x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2, fill);
 }
 
-/** What one paint drew: dots per part (after culling) and how many were culled. */
-export type DavePaintStats = { front: number; side: number; back: number; ear: number; culled: number; lod: boolean };
+/**
+ * What one paint drew: dots per head part (after culling) and how many head dots were culled; `hat` counts the
+ * band and felt dots drawn, `monocle` the rim and chain beads (0 when the face is turned away).
+ */
+export type DavePaintStats = { front: number; side: number; back: number; ear: number; culled: number; lod: boolean; hat: number; monocle: number };
 
 type Item = { depth: number; part: DavePart; dot: number; pr: DaveProjected };
 
@@ -571,15 +609,15 @@ export function paintDave(body: DaveBody, tSeconds: number, painter: DavePainter
   const pitch = UX * pose.scale;
   const glowOn = palette.glowEnabled;
   const ledColor = (tone: Tone) => (tone === "light" ? palette.light : tone === "oops" ? palette.oops : palette.lit);
-  const stats: DavePaintStats = { front: 0, side: 0, back: 0, ear: 0, culled: 0, lod };
+  const stats: DavePaintStats = { front: 0, side: 0, back: 0, ear: 0, culled: 0, lod, hat: 0, monocle: 0 };
 
   // Project everything once.
   const shell = SHELL.map((s) => proj(s.x, s.y, s.z, s.nx, s.ny, s.nz));
   const front = b.dots.map((d) => frontPoint(d, proj));
 
   // Ground shadow.
-  const lift = pose.cy - size * 0.55;
-  painter.ellipse(pose.cx, size * 0.9, pose.scale * (0.95 + lift / size), pose.scale * 0.13, "#000", glowOn ? 0.45 : 0);
+  const lift = pose.cy - size * HEAD_CY;
+  painter.ellipse(pose.cx, size * SHADOW_CY, pose.scale * (0.95 + lift / size), pose.scale * 0.13, "#000", palette.shadow);
 
   // Silhouettes: head hull and ear hulls.
   const headPts: [number, number][] = [];
@@ -638,20 +676,9 @@ export function paintDave(body: DaveBody, tSeconds: number, painter: DavePainter
     if (glowOn && px.i > 0.3) painter.glow(p.x, p.y, pitch * 1.3 * p.f, px.tone === "oops" ? palette.oops : palette.glow, 0.2 * px.i * emit);
     painter.dot(p.x, p.y, pitch * (px.tone === "light" ? 0.4 : 0.37) * p.f, ledColor(px.tone), px.i * emit);
   }
+  paintMonocle(b, proj, painter, palette, pitch, lod, stats);
   for (const s of near) drawEar(s);
-
-  // Antenna: 3D stalk from the crown with the spring bulb.
-  const base = proj(0, -HB, 0, 0, -1, 0);
-  const tip = proj(b.bulb.x * UX, -HB - 0.42, 0, 0, -1, 0);
-  painter.line(base.x, base.y, tip.x, tip.y, palette.rim, Math.max(1, pitch * 0.32 * base.f));
-  painter.ellipse(base.x, base.y, pitch * 0.9 * base.f, pitch * 0.32 * base.f, palette.shellStroke);
-  const ba = bulbAlpha(b, mood, t);
-  const bulbColor = mood === "oops" ? palette.oops : palette.lit;
-  const br = pitch * 0.72 * tip.f;
-  if (glowOn) painter.glow(tip.x, tip.y, (br / 0.72) * (1.4 + 2.2 * ba), mood === "oops" ? palette.oops : palette.glow, 0.45 * ba);
-  painter.dot(tip.x, tip.y, br, palette.off);
-  painter.dot(tip.x, tip.y, br, bulbColor, ba);
-  if (ba > 0.6) painter.dot(tip.x - br * 0.3, tip.y - br * 0.3, br * 0.3, palette.light, ba);
+  paintHat(b, mood, t, proj, painter, palette, pitch, lod, stats);
 
   // Mood extras, in screen space around the projected head.
   const px = (c: number) => pose.cx + (c - CX) * pitch;
@@ -692,6 +719,121 @@ export function paintDave(body: DaveBody, tSeconds: number, painter: DavePainter
     }
   }
   return stats;
+}
+
+type Projector = ReturnType<typeof makeProjector>;
+type V3 = [number, number, number];
+
+/** Brim centre pose: the resting tilt plus the wobble spring, and the hop and extra tilt of a poke's hat tip. */
+function hatPose(b: DaveBody): { tilt: number; lift: number } {
+  const tip = b.pokeT > 0 ? Math.sin(Math.PI * (1 - b.pokeT / POKE_DUR)) : 0;
+  return { tilt: HAT_TILT + b.hat.x * HAT_SWAY + tip * TIP_TILT, lift: tip * TIP_LIFT };
+}
+
+/** Top hat: brim and crown silhouettes, a lit top when seen from above, felt dots and the LED band. */
+function paintHat(b: DaveBody, mood: DaveMood, t: number, proj: Projector, painter: DavePainter, palette: DavePalette, pitch: number, lod: boolean, stats: DavePaintStats): void {
+  const pose = hatPose(b);
+  const c = Math.cos(pose.tilt);
+  const sn = Math.sin(pose.tilt);
+  const at = (hx: number, hy: number, hz: number, nx = 0, ny = -1, nz = 0): DaveProjected =>
+    proj(HAT_X + hx * c - hy * sn, HAT_Y - pose.lift + hx * sn + hy * c, hz, nx * c - ny * sn, nx * sn + ny * c, nz);
+  const ring = (y: number, r: number, n: number, off = 0, curl = 0): DaveProjected[] => {
+    const out: DaveProjected[] = [];
+    for (let i = 0; i < n; i++) {
+      const th = ((i + off) / n) * TAU;
+      const cx = Math.cos(th);
+      const sz = Math.sin(th);
+      out.push(at(cx * r, y - curl * cx * cx, sz * r, cx, 0, sz));
+    }
+    return out;
+  };
+  const xy = (ps: DaveProjected[]): [number, number][] => ps.map((p) => [p.x, p.y]);
+
+  const brim = hull([...xy(ring(0, BRIM_R, HAT_RING, 0, BRIM_CURL)), ...xy(ring(BRIM_T, BRIM_R, HAT_RING, 0, BRIM_CURL))], 0);
+  const top = ring(-CROWN_H, CROWN_R1, HAT_RING);
+  const crown = hull([...xy(ring(-0.01, CROWN_R0, HAT_RING)), ...xy(top)], 0);
+  // Seen from above, the crown stands on the brim; from below, the brim hides the crown's foot.
+  const brimTopShows = at(0, 0, 0).facing > 0;
+  if (brimTopShows) fillPoly(painter, brim, palette.hat, palette.hatStroke);
+  fillPoly(painter, crown, palette.hat, palette.hatStroke);
+  if (at(0, -CROWN_H, 0).facing > 0) fillPoly(painter, top.flatMap((p) => [p.x, p.y]), palette.hatTop, palette.hatStroke);
+
+  const radiusAt = (h: number) => CROWN_R0 + (CROWN_R1 - CROWN_R0) * (h / CROWN_H);
+  if (!lod) {
+    FELT_ROWS.forEach((h, row) => {
+      for (const p of ring(-h, radiusAt(h) + 0.004, FELT_DOTS, row % 2 ? 0.5 : 0)) {
+        if (p.facing < 0.02) continue;
+        stats.hat++;
+        const fade = clamp01(p.facing / 0.3);
+        painter.dot(p.x, p.y, pitch * 0.24 * p.f, p.light > 0.85 ? palette.rim : palette.hatDot, clamp01(0.25 + 0.75 * p.light) * fade);
+      }
+    });
+  }
+  const ba = bandAlpha(b, mood, t);
+  const bandColor = mood === "oops" ? palette.oops : palette.lit;
+  for (const p of ring(-BAND_H, radiusAt(BAND_H) + 0.006, BAND_DOTS)) {
+    if (p.facing < 0.02) continue;
+    stats.hat++;
+    const fade = clamp01(p.facing / 0.3);
+    const r = pitch * (lod ? 0.34 : 0.3) * p.f;
+    if (palette.glowEnabled && fade > 0.5) painter.glow(p.x, p.y, pitch * 1.2 * p.f, mood === "oops" ? palette.oops : palette.glow, 0.22 * ba * fade);
+    painter.dot(p.x, p.y, r, palette.hatDot, fade);
+    painter.dot(p.x, p.y, r, bandColor, ba * fade);
+  }
+  if (brimTopShows) return;
+  fillPoly(painter, brim, palette.hat, palette.hatStroke);
+}
+
+/** A point on the face just proud of the head surface, with the surface normal there. */
+function onFace(x: number, y: number, lift: number): { p: V3; n: V3 } {
+  const z = surfaceZ(x, y);
+  return { p: [x, y, z + lift], n: headNormal(x, y, z) };
+}
+
+/** Monocle: a bead rim around DAVE's right eye, a glint on the lens and a chain that swings to the ear. */
+function paintMonocle(b: DaveBody, proj: Projector, painter: DavePainter, palette: DavePalette, pitch: number, lod: boolean, stats: DavePaintStats): void {
+  const ex = (MONO_EYE.x - CX) * UX;
+  const ey = (EYE_ROW - CY) * UY;
+  const rx = MONO_R * UX;
+  const ry = MONO_R * UY;
+  const rim: DaveProjected[] = [];
+  for (let i = 0; i < MONO_BEADS; i++) {
+    const th = (i / MONO_BEADS) * TAU;
+    const f = onFace(ex + Math.cos(th) * rx, ey + Math.sin(th) * ry, MONO_LIFT);
+    rim.push(proj(...f.p, ...f.n));
+  }
+  const width = Math.max(1, pitch * 0.16 * (rim[0]?.f ?? 1));
+  rim.forEach((p, i) => {
+    const q = rim[(i + 1) % rim.length];
+    if (q && p.facing > 0.15 && q.facing > 0.15) painter.line(p.x, p.y, q.x, q.y, palette.monocle, width);
+  });
+  if (lod) { stats.monocle += rim.filter((p) => p.facing > 0.15).length; return; }
+  const bead = (p: DaveProjected, r: number, color: string, alpha = 1) => {
+    if (p.facing < 0.02) return;
+    stats.monocle++;
+    painter.dot(p.x, p.y, r * p.f, color, alpha * clamp01(p.facing / 0.3));
+  };
+  for (const p of rim) bead(p, pitch * 0.2, palette.monocle);
+  if (palette.glowEnabled) {
+    // Lens glint: a short arc inside the rim, upper left.
+    for (let k = 0; k < 4; k++) {
+      const th = Math.PI * (1.12 + k * 0.1);
+      const f = onFace(ex + Math.cos(th) * rx * 0.66, ey + Math.sin(th) * ry * 0.66, MONO_LIFT);
+      bead(proj(...f.p, ...f.n), pitch * (0.15 - k * 0.02), palette.glint, 0.55 - k * 0.1);
+    }
+  }
+  // Chain: from the rim's lower outer edge, sagging (and swinging with the hat spring) to the ear.
+  const a0 = Math.PI * 0.8;
+  const sx = ex + Math.cos(a0) * rx;
+  const sy = ey + Math.sin(a0) * ry;
+  for (let i = 1; i <= CHAIN_BEADS; i++) {
+    const u = i / CHAIN_BEADS;
+    const sag = Math.sin(Math.PI * u);
+    const x = sx + (CHAIN_END.x - sx) * u + b.hat.x * UX * 0.5 * sag;
+    const y = sy + (CHAIN_END.y - sy) * u + CHAIN_SAG * sag;
+    const f = onFace(clamp(x, -HA * 0.995, HA * 0.995), clamp(y, -HB * 0.995, HB * 0.995), 0.03);
+    bead(proj(...f.p, ...f.n), pitch * 0.13, palette.monocle, 0.9);
+  }
 }
 
 /** One stable 3/4-view frame for reduced motion: no springs, no blink, fixed time. */

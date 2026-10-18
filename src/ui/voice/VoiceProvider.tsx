@@ -3,7 +3,7 @@ import type { FocusState } from "../../intel/types.ts";
 import { intelApi } from "../intel-api.ts";
 import { triageApi } from "../triage-api.ts";
 import type { DaveLevels } from "../mascot/types.ts";
-import { DATA_CHANGED_EVENT, LIMITS, type DataChangedDetail, type EndReason, type StartSessionResponse, type ApprovalVia, type ToolCallResponse, type VoiceMode, type VoiceSettings, type VoiceStatus } from "../../voice/types.ts";
+import { DATA_CHANGED_EVENT, LIMITS, type DataChangedDetail, type EndReason, type StartSessionResponse, type ApprovalVia, type ToolCallResponse, type VoiceMode, type VoiceSettings, type VoiceStatus, type VoiceTheme } from "../../voice/types.ts";
 import { voiceApi, VoiceRequestError } from "./api.ts";
 import { INITIAL_VOICE_STATE, isActive, phaseAnnouncement, voiceReducer, type VoiceState } from "./machine.ts";
 import { appendCard, appendLine, approvalAnnouncement, approvalNote, cardsFromToolResponse, confirmNote, openConfirmIds, UNDO_NOTE, undoState, USER_WORDS_WAIT_MS, contextNote, documentTextNote, downscalePlan, focusChips, focusUpdateNote, imageSendable, isTypingTarget, matchShortcut, pageContext, sharedNote, transcriptOf, updateCard, type FocusChips, type TimelineEntry, type VoiceCard } from "./model.ts";
@@ -24,6 +24,8 @@ export type VoiceContextValue = {
   caption: { user: string; assistant: string };
   status: VoiceStatus | null;
   settings: VoiceSettings | null;
+  /** Display-only stage theme; never sent to the model. */
+  theme: VoiceTheme;
   mode: VoiceMode;
   muted: boolean;
   holding: boolean;
@@ -514,7 +516,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const lookingAt = lookingAtId ? focus?.projects.find(p => p.projectId === lookingAtId)?.projectName ?? null : null;
 
   const value = useMemo<VoiceContextValue>(() => ({
-    state, entries, caption, status, settings: status?.settings ?? null, mode, muted, holding, error, chips: focusChips(focus), lookingAt, levels, open,
+    state, entries, caption, status, settings: status?.settings ?? null, theme: status?.settings.theme ?? "dark", mode, muted, holding, error, chips: focusChips(focus), lookingAt, levels, open,
     openPanel, closePanel, start, end, toggleMute, pushToTalk, sendText, shareFiles, answerConfirm, copyCard, askAbout, saveSettings,
     approval, setApproval, undoCleanUp,
   }), [state, entries, caption, status, mode, muted, holding, error, focus, lookingAt, levels, open, openPanel, closePanel, start, end, toggleMute, pushToTalk, sendText, shareFiles, answerConfirm, copyCard, askAbout, saveSettings, approval, setApproval, undoCleanUp]);

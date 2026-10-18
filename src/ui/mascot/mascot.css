@@ -15,17 +15,18 @@
   font: inherit;
   cursor: pointer;
 }
-.dave-mascot--button:focus-visible { outline: 2px solid #9d8cff; outline-offset: 3px; }
+.dave-mascot--button:focus-visible { outline: 2px solid var(--dave-focus, #9d8cff); outline-offset: 3px; }
 
-.dave-led { display: inline-block; line-height: 0; vertical-align: middle; color: #9d8cff; }
-.dave-led--dim { color: #8a80b8; }
-.dave-led--oops { color: #ff6b60; }
-.dave-led__dots { display: block; overflow: visible; filter: drop-shadow(0 0 2px color-mix(in srgb, currentColor 70%, transparent)); }
+/* Colours come from custom properties so a stage (the light voice stage) can repaint them; defaults are the dark stage. */
+.dave-led { display: inline-block; line-height: 0; vertical-align: middle; color: var(--dave-led-lit, #9d8cff); }
+.dave-led--dim { color: var(--dave-led-dim, #8a80b8); }
+.dave-led--oops { color: var(--dave-led-oops, #ff6b60); }
+.dave-led__dots { display: block; overflow: visible; filter: var(--dave-led-filter, drop-shadow(0 0 2px color-mix(in srgb, currentColor 70%, transparent))); }
 .dave-led__dots circle { fill: currentColor; }
 
 .dave-gallery { display: flex; flex-wrap: wrap; gap: 12px; list-style: none; margin: 0; padding: 0; }
-.dave-gallery__tile { display: grid; justify-items: center; gap: 6px; padding: 10px 10px 8px; border-radius: 14px; background: #0a0a0c; border: 1px solid #24202f; }
-.dave-gallery__caption { font-size: 12px; color: #d6ceff; text-transform: capitalize; }
+.dave-gallery__tile { display: grid; justify-items: center; gap: 6px; padding: 10px 10px 8px; border-radius: 14px; background: var(--dave-tile-bg, #0a0a0c); border: 1px solid var(--dave-tile-rule, #24202f); }
+.dave-gallery__caption { font-size: 12px; color: var(--dave-tile-text, #d6ceff); text-transform: capitalize; }
 
 @media (forced-colors: active) {
   .dave-led, .dave-led--dim, .dave-led--oops { color: CanvasText; }

@@ -24,8 +24,8 @@ export function VoiceDock({ hidden = false }: { hidden?: boolean }) {
     return () => cancelAnimationFrame(frame);
   }, [active, hidden, levels]);
   const approved = active && voice.approval.on;
-  return <button ref={ring} type="button" hidden={hidden} className={`voice-dock${active ? " voice-dock-live" : ""}`} aria-label={active ? `Open voice panel. DAVE is ${MOOD_LABEL[mood]}${approved ? ". Approve all is on" : ""}` : "Talk to DAVE (Alt+Shift+D)"} onClick={voice.openPanel}>
-    <Suspense fallback={<span className="voice-dock-dot" aria-hidden="true" />}><DaveMascot mood={mood} size={64} levels={voice.levels} label="" className="voice-dock-mascot" /></Suspense>
+  return <button ref={ring} type="button" hidden={hidden} className={`voice-dock${active ? " voice-dock-live" : ""}${voice.theme === "light" ? " voice-theme-light" : ""}`} aria-label={active ? `Open voice panel. DAVE is ${MOOD_LABEL[mood]}${approved ? ". Approve all is on" : ""}` : "Talk to DAVE (Alt+Shift+D)"} onClick={voice.openPanel}>
+    <Suspense fallback={<span className="voice-dock-dot" aria-hidden="true" />}><DaveMascot mood={mood} size={64} levels={voice.levels} theme={voice.theme} label="" className="voice-dock-mascot" /></Suspense>
     {approved && <span className="voice-dock-badge" title="Approve all is on: DAVE makes changes without asking">Approve all on</span>}
   </button>;
 }

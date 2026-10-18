@@ -435,7 +435,7 @@ mint stand in for OpenAI, a fake WebRTC peer replaces the call, and `api.openai.
 is routed to a local stub, so no audio or network leaves the machine. It checks the
 dock, Direction reordering, session start (ephemeral secret, no model in the SDP URL,
 no forbidden tools), confirm before write, PDF and PNG upload, typing, settings, history,
-390 and 1440 px, contrast and 44 px targets on the stage, and that the synthetic
+390 and 1440 px, contrast and 44 px targets on the stage (dark and light mode), and that the synthetic
 ChatGPT token never appears in a response. The fixture also seeds synthetic meeting
 noise. The walkthrough checks Approve all: the button accepts open cards, the next write
 applies at once, a refused spoken grant offers the button, and approval ends with the

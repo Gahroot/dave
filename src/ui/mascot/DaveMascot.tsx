@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createDaveBody, paintDave, paintStaticDave, stepDave, type DaveBody } from "./engine.ts";
-import { DAVE_FORCED_PALETTE, DAVE_PALETTE } from "./palette.ts";
+import { davePalette } from "./palette.ts";
 import { createCanvasPainter } from "./paint-canvas.ts";
 import { MOOD_LABEL, type DaveMascotProps } from "./types.ts";
 import "./mascot.css";
@@ -16,13 +16,14 @@ function query(q: string): boolean {
 }
 
 /** The DAVE bot: an animated LED robot face on a canvas. */
-export function DaveMascot({ mood, size, levels, onPoke, label, className }: DaveMascotProps) {
+export function DaveMascot({ mood, theme = "dark", size, levels, onPoke, label, className }: DaveMascotProps) {
   const wrapRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const live = useRef({ mood, levels, size, poke: false, look: { x: 0, y: 0 }, spin: 0, dragging: false });
+  const live = useRef({ mood, theme, levels, size, poke: false, look: { x: 0, y: 0 }, spin: 0, dragging: false });
   const drag = useRef<{ id: number; x0: number; y0: number; last: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
   live.current.mood = mood;
+  live.current.theme = theme;
   live.current.levels = levels;
   live.current.size = size;
   const [reducedMotion, setReducedMotion] = useState(() => query("(prefers-reduced-motion: reduce)"));
@@ -33,7 +34,7 @@ export function DaveMascot({ mood, size, levels, onPoke, label, className }: Dav
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
-  const paintKey = reducedMotion ? `static:${mood}:${size}` : "live";
+  const paintKey = reducedMotion ? `static:${mood}:${size}:${theme}` : "live";
   const bodyRef = useRef<DaveBody | null>(null);
 
   // Animation loop (or one static frame per mood under reduced motion).
@@ -43,7 +44,8 @@ export function DaveMascot({ mood, size, levels, onPoke, label, className }: Dav
     if (!canvas || !wrap) return;
     const painter = createCanvasPainter(canvas);
     if (!painter) return;
-    const palette = () => (query("(forced-colors: active)") ? DAVE_FORCED_PALETTE : DAVE_PALETTE);
+    // Read per frame: a theme switch repaints the running loop without restarting it.
+    const palette = () => davePalette(live.current.theme, query("(forced-colors: active)"));
     const dpr = () => (typeof window.devicePixelRatio === "number" ? window.devicePixelRatio : 1);
 
     if (reducedMotion) {

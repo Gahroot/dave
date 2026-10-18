@@ -590,6 +590,33 @@ try {
   assert.ok(history.sessions[0].lines >= 3 && history.sessions[0].actions >= 1, JSON.stringify(history.sessions[0]));
   assert.equal(await page.evaluate(() => window.__rt.channel.readyState), 'closed');
   await shot(page, 'panel-ended-1440');
+
+  // 10b. Light mode: the header toggle repaints the stage at once; the same checks hold, then back to dark.
+  const themeToggle = drawer.getByRole('button', { name: 'Light mode', exact: true });
+  assert.equal(await themeToggle.getAttribute('aria-pressed'), 'false');
+  await themeToggle.click();
+  await page.locator('[data-voice-panel].voice-theme-light[data-theme="light"]').waitFor();
+  assert.equal(await themeToggle.getAttribute('aria-pressed'), 'true');
+  assert.ok(await page.evaluate(() => document.querySelector('[data-voice-panel]')?.classList.contains('voice-theme-light')), 'stage is light');
+  await shot(page, 'light-idle-1440');
+  await auditStage(page, 'light idle drawer 1440');
+  await drawer.getByRole('button', { name: 'Voice settings', exact: true }).click();
+  const lightSheet = drawer.getByRole('group', { name: 'Voice settings' });
+  assert.equal(await lightSheet.getByRole('checkbox', { name: 'Light mode', exact: true }).isChecked(), true);
+  await shot(page, 'light-settings-1440');
+  await auditStage(page, 'light settings 1440');
+  await lightSheet.getByRole('button', { name: 'Close settings', exact: true }).click();
+  // The Close settings button is gone, so the panel takes focus back (after the browser's own blur); then Escape works.
+  await page.waitForFunction(() => document.activeElement?.closest('[data-voice-panel]') != null);
+  await page.keyboard.press('Escape');
+  await drawer.waitFor({ state: 'detached' });
+  assert.ok(await page.evaluate(() => document.querySelector('.voice-dock')?.classList.contains('voice-theme-light')), 'dock is light');
+  await dock.screenshot({ path: `${out}/light-dock-64.png` });
+  await dock.click();
+  await drawer.waitFor();
+  await themeToggle.click();
+  await page.waitForFunction(() => !document.querySelector('[data-voice-panel]')?.classList.contains('voice-theme-light'));
+  assert.equal(await themeToggle.getAttribute('aria-pressed'), 'false');
   await context.close();
 
 
