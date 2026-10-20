@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "loading-page",
+  "description": "Only the bundled local loading/error page may query server status and retry. The remote loopback server origin gets no IPC (no `remote` entry).",
+  "local": true,
+  "windows": ["main"],
+  "permissions": ["allow-status", "allow-retry"]
+}

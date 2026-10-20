@@ -1,0 +1,28 @@
+{
+  "//": "Expo's base options (expo/tsconfig.base.json, SDK 58) are inlined instead of extended, so tools outside this app (the root vitest suite and CI, which never install mobile/node_modules) can read this file.",
+  "compilerOptions": {
+    "allowJs": true,
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "lib": ["DOM", "ESNext"],
+    "module": "preserve",
+    "moduleDetection": "force",
+    "moduleResolution": "bundler",
+    "customConditions": ["react-native"],
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "target": "ESNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "paths": {
+      "lucide-react": ["./node_modules/lucide-react-native"],
+      "@noble/ciphers/*": ["./node_modules/@noble/ciphers/*"],
+      "@noble/hashes/*": ["./node_modules/@noble/hashes/*"]
+    }
+  },
+  "include": ["index.ts", "src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "babel.config.js", "metro.config.cjs", "android", "ios"]
+}

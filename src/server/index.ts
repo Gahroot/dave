@@ -27,6 +27,9 @@ import { createVoiceService } from "../voice/service.ts";
 import { registerVoiceRoutes } from "./voice-routes.ts";
 import { createTriageService } from "../triage/service.ts";
 import { registerTriageRoutes } from "./triage-routes.ts";
+import { createMobileService, type MobileServiceOptions } from "../mobile/service.ts";
+import { mobileSettings } from "../mobile/settings.ts";
+import { registerMobileRoutes } from "./mobile-routes.ts";
 import { createWorkService } from "../work/service.ts";
 import { readWorkEvidence } from "../work/store.ts";
 import { registerWorkRoutes } from "./work-routes.ts";
@@ -40,9 +43,10 @@ const DIST = fileURLToPath(new URL("../../dist", import.meta.url));
 export async function buildServer(paths = sourcePaths(), options: { browserOrigins?: string[]; providers?: ProviderService; agentOptions?: AgentOptions; meetings?: MeetingServiceOptions; startMeetingScheduler?: boolean; startIntelScheduler?: boolean;
   /** Real server entry only: poll EZ Coder runs, local git and (opt-in) GitHub every minute. Tests never start it. */
   startWorkWatcher?: boolean;
-  voice?: { fetch?: typeof fetch; now?: () => Date }; documents?: { extractor?: TextExtractor } } = {}) {
+  voice?: { fetch?: typeof fetch; now?: () => Date }; documents?: { extractor?: TextExtractor }; mobile?: MobileServiceOptions; startMobileGateway?: boolean } = {}) {
   const app = Fastify({ logger: false });
-  registerRequestGuard(app, options.browserOrigins ?? localBrowserOrigins(Number(process.env.PORT ?? 4317)));
+  const origins = options.browserOrigins ?? localBrowserOrigins(Number(process.env.PORT ?? 4317));
+  registerRequestGuard(app, origins);
   const db = openDb(paths.appHome);
   const providers = options.providers ?? providerService();
   // Fastify closes hooks in reverse registration order: planner, auth, database.
@@ -175,6 +179,13 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
   if (options.startMeetingScheduler) meetings.startScheduler();
   if (options.startIntelScheduler) intel.startScheduler();
   if (options.startWorkWatcher) work.start();
+  // Phone access: registered after the database hook so the LAN listener closes
+  // first. It binds only when the entry point (or an explicit test) asks.
+  const [firstOrigin = ""] = origins;
+  const mobile = createMobileService(app, firstOrigin, mobileSettings(db), { ...options.mobile, allowListen: options.startMobileGateway === true });
+  app.addHook("onClose", async () => { await mobile.close(); });
+  registerMobileRoutes(app, mobile);
+  if (options.startMobileGateway) app.addHook("onReady", async () => { await mobile.start(); });
 
   if (fs.existsSync(path.join(DIST, "index.html"))) {
     await app.register(fastifyStatic, { root: DIST });
@@ -191,7 +202,7 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT ?? 4317);
   // Explicit dev proxy origins only; never trust X-Forwarded-* supplied by clients.
   const extraOrigins = process.env.PCC_BROWSER_ORIGINS?.split(",").map((origin) => origin.trim()).filter(Boolean) ?? [];
-  const app = await buildServer(sourcePaths(), { browserOrigins: [...localBrowserOrigins(port), ...extraOrigins], startMeetingScheduler: true, startIntelScheduler: true, startWorkWatcher: true });
+  const app = await buildServer(sourcePaths(), { browserOrigins: [...localBrowserOrigins(port), ...extraOrigins], startMeetingScheduler: true, startIntelScheduler: true, startWorkWatcher: true, startMobileGateway: true });
   await app.listen({ port, host: "127.0.0.1" });
   console.log(`Portfolio Command Center → http://127.0.0.1:${port}`);
   let stopping = false;

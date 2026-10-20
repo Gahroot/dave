@@ -1,8 +1,9 @@
 # Local provider and delivery request boundary
 
 Step 4 installs a shared guard before route registration in `buildServer`.
-It covers `/api/providers`, all descendants, `/api/projects/:id/delivery` and
-its descendants, plus `/api/security/csrf`. Route matching uses Fastify's resolved
+It covers `/api/providers`, `/api/agents`, `/api/delivery`, `/api/meetings`,
+`/api/intel` and `/api/mobile` (phone pairing management), all descendants,
+`/api/projects/:id/delivery` and its descendants, plus `/api/security/csrf`. Route matching uses Fastify's resolved
 route definitions, including prefixed child plugins, not untrusted forwarded URLs.
 No provider connection, model call or delivery endpoint implementation is added
 by this step; tests use harmless fixture handlers under those namespaces.
