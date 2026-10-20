@@ -35,6 +35,10 @@ export const DEFAULT_MODEL: RealtimeModel = "gpt-realtime-2.1";
 export type VoiceMode = "hands_free" | "push_to_talk";
 export const VOICE_MODES: readonly VoiceMode[] = ["hands_free", "push_to_talk"];
 
+/** How the Talk to DAVE stage looks. Display only: it never reaches the model. */
+export type VoiceTheme = "dark" | "light";
+export const VOICE_THEMES: readonly VoiceTheme[] = ["dark", "light"];
+
 export type VoiceSettings = {
   voice: VoiceName;
   model: RealtimeModel;
@@ -43,8 +47,10 @@ export type VoiceSettings = {
   mode: VoiceMode;
   /** Start/stop chimes. */
   sounds: boolean;
+  /** The dark LED stage (default) or the light stage. Applies at once, to the panel, the dock and the DAVE bot. */
+  theme: VoiceTheme;
 };
-export const DEFAULT_VOICE_SETTINGS: VoiceSettings = { voice: DEFAULT_VOICE, model: DEFAULT_MODEL, greeting: true, mode: "hands_free", sounds: true };
+export const DEFAULT_VOICE_SETTINGS: VoiceSettings = { voice: DEFAULT_VOICE, model: DEFAULT_MODEL, greeting: true, mode: "hands_free", sounds: true, theme: "dark" };
 
 /** Why voice cannot start. Every reason maps to one plain message; none carries provider text. */
 export type VoiceUnavailableReason = "disabled" | "not_connected" | "reconnect" | "not_entitled" | "rate_limited" | "mint_failed";

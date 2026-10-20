@@ -69,6 +69,8 @@ describe("prioritiser scenarios", () => {
     expect(typeof o.brief).toBe("string");
     expect(o.brief).toContain("Definition of done");
     expect(h.intel.brief(o.id)).toBe(o.brief);
+    expect(o.brief).toContain(`\n\nDAVE-Objective: ${o.id}\nDAVE-Items: ${o.targetItemIds.join(",")}\n`);
+    expect(o.brief).toContain(`When you commit, add the trailer \`DAVE-Objective: ${o.id}\`.`);
     for (const f of fs.readdirSync("src/intel")) expect(fs.readFileSync(`src/intel/${f}`, "utf8")).not.toMatch(/agents\//);
   });
 

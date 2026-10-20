@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { emptyActivity } from "../src/shared/types.ts";
 import { intelHarness } from "./intel-fixture.ts";
+import type { RecommendationSnapshot } from "../src/intel/ledger-types.ts";
+import type { WorkEvidence } from "../src/work/types.ts";
 
 let h: ReturnType<typeof intelHarness>;
 afterEach(() => h?.close());
@@ -102,6 +104,27 @@ describe("reconcile: code evidence is not acceptance", () => {
     expect(req.readinessReached).toBeNull();
     expect(req.provenance.some((p) => p.sourceKind === "git")).toBe(true);
     expect(h.intel.projectIntel("p1").gaps.some((g) => g.state === "unverified")).toBe(true);
+  });
+
+  it("work events link explicitly by item id, reach only implementation_observed, and the ledger hook sees the ranking", async () => {
+    const work: WorkEvidence[] = [];
+    const seen: RecommendationSnapshot[] = [];
+    h = intelHarness(undefined, { workEvidence: (id) => (id === "p1" ? work : []), onRecommendations: (s) => { seen.push(s); throw new Error("ledger failure is ignored"); } });
+    h.addItem({ id: "s1", recordingId: "100", kind: "suggestion", role: "client", text: "CSV export of invoices" });
+    await h.intel.reconcile();
+    h.intel.resolveProposal(pending("new_requirement")[0]!.id, true, null);
+    const req = h.intel.store.items("p1").find((i) => i.kind === "requirement")!;
+    expect(req.evidenceState).toBe("not_implemented");
+    // The run's wording shares nothing with the title; only the explicit DAVE-Items link ties it to the item.
+    work.push({ id: "we-1", kind: "agent-task", label: "EZ Coder run finished", at: "2026-10-12T08:00:00.000Z", text: "Finance download button", itemIds: [req.id] });
+    await h.intel.reconcile("p1");
+    const after = h.intel.store.item(req.id)!;
+    expect(after.evidenceState).toBe("implementation_observed");
+    expect(after.status).not.toBe("done");
+    expect(after.provenance.some((p) => p.sourceKind === "agent-task" && p.sourceId === "we-1")).toBe(true);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.at(-1)).toMatchObject({ trigger: "reconcile", at: "2026-10-12T09:00:00.000Z" });
+    expect(seen.at(-1)?.byProject.get("p1")?.objective?.projectId).toBe("p1");
   });
 });
 

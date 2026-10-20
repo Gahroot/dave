@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Stack, Text } from "@mantine/core";
-import { ArrowRight, CircleCheck, Handshake, MessageSquareWarning, TriangleAlert } from "lucide-react";
+import { ArrowRight, CircleCheck, Handshake, Lightbulb, MessageSquareWarning, TriangleAlert } from "lucide-react";
 import { CountPill, StatusIcon, StatusTile } from "../components/Status.tsx";
 import { PanelHead } from "../components/WorkspacePrimitives.tsx";
 import type { StatusSpec } from "../status.ts";
 import type { MeetingItem, ProjectMeetingsOverview, PromiseStateName } from "../../meetings/types.ts";
 import { deliveryApi } from "../delivery-api.ts";
 import { routeLink } from "../navigation.ts";
-import { MeetingItemRow, type ItemAction } from "../components/MeetingItemRow.tsx";
+import { MeetingItemRow, type ItemAction, type ItemStrength } from "../components/MeetingItemRow.tsx";
+import { IDEAS_LABEL, splitByStrength } from "../meetings-model.ts";
 
 const OVERLOOKED: readonly PromiseStateName[] = ["overdue", "not_followed_up"];
 const STATE_NOTE: Record<PromiseStateName, string> = { overdue: "Overdue", due_soon: "Due soon", not_followed_up: "No work since the call", open: "" };
@@ -31,24 +32,28 @@ export function ProjectMeetings({ projectId, returnTo }: { projectId: string; re
       .catch(e => { if (!ac.signal.aborted) setError(e instanceof Error ? e.message : "Meeting context unavailable."); });
     return () => ac.abort();
   }, [projectId, version]);
-  const onAction = async (item: MeetingItem, action: ItemAction) => {
+  const post = async (item: MeetingItem, path: "status" | "strength", body: Record<string, string>) => {
     if (lock.current) return;
     lock.current = true; setBusyId(item.id); setError("");
-    try { await deliveryApi(`/api/meetings/items/${encodeURIComponent(item.id)}/status`, { action }); setVersion(v => v + 1); }
+    try { await deliveryApi(`/api/meetings/items/${encodeURIComponent(item.id)}/${path}`, body); setVersion(v => v + 1); }
     catch (e) { setError(e instanceof Error ? e.message : "Action failed. Retry."); }
     finally { lock.current = false; setBusyId(null); }
   };
+  const onAction = (item: MeetingItem, action: ItemAction) => void post(item, "status", { action });
+  const onStrength = (item: MeetingItem, strength: ItemStrength) => void post(item, "strength", { strength });
 
   if (error && !data) return <Alert color="red" title="Meeting context unavailable" role="alert">{error}</Alert>;
   if (!data || (data.items.length === 0 && !data.lastCall)) return null;
 
-  const promises = data.items.filter(i => i.kind === "commitment");
+  const { firm, ideas: allIdeas } = splitByStrength(data.items);
+  const ideas = allIdeas.filter(i => i.status === "open");
+  const promises = firm.filter(i => i.kind === "commitment");
   const state = (i: MeetingItem) => data.promiseStates[i.id] ?? "open";
   const overlooked = promises.filter(i => i.status === "open" && OVERLOOKED.includes(state(i)));
   const open = promises.filter(i => (i.status === "open" && !OVERLOOKED.includes(state(i))) || i.status === "looks_done");
   const done = promises.filter(i => i.status === "done");
-  const asks = data.items.filter(i => (i.kind === "pain_point" || i.kind === "suggestion") && ["open", "planned", "looks_done"].includes(i.status));
-  const row = (item: MeetingItem) => <MeetingItemRow key={item.id} item={item} busy={busyId === item.id} onAction={onAction} returnTo={returnTo} showProject={false} showKind={item.kind !== "commitment"}
+  const asks = firm.filter(i => (i.kind === "pain_point" || i.kind === "suggestion") && ["open", "planned", "looks_done"].includes(i.status));
+  const row = (item: MeetingItem) => <MeetingItemRow key={item.id} item={item} busy={busyId === item.id} onAction={onAction} onStrength={onStrength} returnTo={returnTo} showProject={false} showKind={item.kind !== "commitment"}
     flag={item.kind === "commitment" && item.status === "open" ? STATE_NOTE[state(item)] : ""} />;
   const group = (id: string, title: string, items: MeetingItem[], spec: StatusSpec) => items.length > 0 && <section aria-labelledby={id} className="meeting-group">
     <h3 className="panel-subhead" id={id}><StatusTile spec={spec} />{title} <CountPill value={items.length} tone={spec.tone} decorative={false} /></h3>
@@ -72,6 +77,7 @@ export function ProjectMeetings({ projectId, returnTo }: { projectId: string; re
     {group(`overlooked-${projectId}`, "Overlooked", overlooked, { tone: "red", icon: TriangleAlert, label: "" })}
     {group(`promised-${projectId}`, "Promised", open, { tone: "blue", icon: Handshake, label: "" })}
     {group(`asks-${projectId}`, "Client asks", asks, { tone: "violet", icon: MessageSquareWarning, label: "" })}
+    {ideas.length > 0 && <details className="quiet-details panel-done"><summary><Lightbulb size={16} aria-hidden="true" /> {IDEAS_LABEL} ({ideas.length})</summary><ul className="meeting-list">{ideas.map(row)}</ul></details>}
     {done.length > 0 && <details className="quiet-details panel-done"><summary><StatusIcon spec={{ tone: "green", icon: CircleCheck, label: "" }} /> Done ({done.length})</summary><ul className="meeting-list">{done.map(row)}</ul></details>}
   </section>;
 }

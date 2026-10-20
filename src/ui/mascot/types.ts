@@ -14,8 +14,13 @@ export const MOOD_LABEL: Record<DaveMood, string> = {
 /** Live audio levels, each read once per animation frame. RMS 0..1. */
 export type DaveLevels = { input: () => number; output: () => number };
 
+/** Which palette the bot paints with: LEDs on the dark stage, or the pearl head on the light stage. */
+export type DaveTheme = "dark" | "light";
+
 export type DaveMascotProps = {
   mood: DaveMood;
+  /** Defaults to "dark". */
+  theme?: DaveTheme;
   /** CSS pixels (square). */
   size: number;
   levels?: DaveLevels;

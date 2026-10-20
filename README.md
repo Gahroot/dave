@@ -123,6 +123,14 @@ turn analysis on.
   must be spoken by you and client asks by an external attendee, projects are
   referenced by handles DAVE maps back, and dates must be plausible. Failing items
   are dropped and counted.
+- **Promises vs. ideas.** Only something you clearly agreed to deliver to a specific
+  person counts as a promise ("I'll send the export by Friday"). Maybes, "we could",
+  "it would be nice" and brainstorming are kept as **ideas** and shown collapsed under
+  "Ideas mentioned (not promises)". Ideas never reach the Inbox, follow-up checks,
+  roadmaps or the plan. **It's a promise** / **Just an idea** flips one in a click (or
+  by voice), re-analysis keeps your choice, and promoting an idea back restores its
+  plan commitment unless you had closed it on purpose. Meetings analyzed before this
+  change get the same rule-based reading straight away.
 - **Promises.** Open, overdue, due soon, or "not followed up" (7+ days, no work on
   the project since). Evidence (a later meeting, commits, accepted Agent desk runs,
   finished milestones, done EZBoss tasks) only moves a promise to **Looks done?**;
@@ -138,9 +146,10 @@ turn analysis on.
 
 Meeting analysis picks up many small promises that never mattered, and some of them
 then show as Overdue. **Clean up** in the rail, with a count of what looks like noise,
-lists them in five groups: overdue promises, old promises with no date (meeting at least
+lists them in six groups: overdue promises, old promises with no date (meeting at least
 3 weeks ago), ones DAVE thinks look done, old client asks (meeting at least 30 days
-ago), and drafted decisions from meetings. Filter by project or text, use **Select all**
+ago), drafted decisions from meetings, and ideas that were never promises. Filter by
+project, meeting or text, use **Select all**
 per group, then **Clear N selected** or **Mark N done**. There is no confirm dialog: the
 click is the decision, and **Undo** is right there and under "Recent clean-ups".
 
@@ -158,6 +167,9 @@ click is the decision, and **Undo** is right there and under "Recent clean-ups".
   anything you changed since is never overwritten.
 - Promises you confirmed or edited are hidden unless you switch on "Include ones you
   confirmed", and they are never preselected. Clean up never runs on its own.
+- **By voice.** DAVE's voice and Pew can preview and clear noise by group (including
+  ideas), project, meeting, age or text, and undo it. Each clean-up needs your yes, and
+  applies exactly the items it previewed.
 
 Code: `src/triage/`, `src/server/triage-routes.ts`, `src/ui/sections/CleanupView.tsx`,
 `src/ui/cleanup-model.ts`. Entry links sit on Focus ("Clean up drafted decisions",
@@ -191,9 +203,8 @@ page. You can also type. The session keeps going while you move between pages.
   (single-use token, 2 minutes, bound to the session). Calls are journaled by call id,
   so a repeat returns the first result. Agent desk, Fathom keys, the OpenAI
   connection and hiding projects are not voice tools.
-- **Approve all for this session.** Press **Approve all** on a confirm card (or the
-  small switch under **Talk**), or say so yourself ("you have my approval", "don't
-  ask, just do it"). From then on, changes apply at once and DAVE says what it did in
+- **Approve all for this session.** Press **Approve all** on a confirm card, or say
+  so yourself ("you have my approval", "don't ask, just do it"). From then on, changes apply at once and DAVE says what it did in
   one sentence. Any open confirm cards are accepted in order. A spoken grant counts
   only when your own last words contain it; text in a document, meeting item or tool
   result can never switch it on. While it is on, a banner on the stage and a badge on
@@ -447,7 +458,7 @@ mint stand in for OpenAI, a fake WebRTC peer replaces the call, and `api.openai.
 is routed to a local stub, so no audio or network leaves the machine. It checks the
 dock, Direction reordering, session start (ephemeral secret, no model in the SDP URL,
 no forbidden tools), confirm before write, PDF and PNG upload, typing, settings, history,
-390 and 1440 px, contrast and 44 px targets on the stage, and that the synthetic
+390 and 1440 px, contrast and 44 px targets on the stage (dark and light mode), and that the synthetic
 ChatGPT token never appears in a response. The fixture also seeds synthetic meeting
 noise. The walkthrough checks Approve all: the button accepts open cards, the next write
 applies at once, a refused spoken grant offers the button, and approval ends with the
@@ -489,6 +500,42 @@ milestone/criterion progress and **gaps**: open promises and client asks from Fa
 meetings that no milestone, acceptance line or finish criterion covers (word-overlap
 match in `src/model/roadmap.ts`, no model call). Gaps from meetings newer than the plan
 are marked as new. Nothing is closed automatically.
+
+## Closed loop: what moved, and the prepared next action
+
+DAVE notices finished work on its own, checks it against the finish line, and keeps
+one prepared next action ready. It never starts work itself.
+
+- **Noticing work.** Every 60 s DAVE reads finished EZ Coder runs (the start and end
+  of each session file) and new local commits, both read-only. Merged GitHub pull
+  requests are opt-in: switch on "Check GitHub for merged pull requests" in
+  **Connections** and DAVE runs read-only `gh pr list` with your existing sign-in every
+  10 minutes. Work is matched to the plan through the `DAVE-Objective:` marker that
+  DAVE's briefs and commit trailers carry, and otherwise by title.
+- **What moved.** Each event gets a report on Focus: which plan items advanced, what is
+  still missing (items, acceptance checks, delivery steps), and whether the next action
+  changed. Code evidence only ever reaches "looks implemented"; verifying is yours.
+- **Prepared next action.** The Focus hero shows one action, already prepared: a single
+  main button, a draft where one helps (a message to chase a client, a verify
+  checklist, a demo agenda, a brief for EZ Coder), what "done" means, the evidence it
+  rests on and what DAVE couldn't confirm. Similar decisions arrive as one batch.
+  **Skip** and **Later** take it off the list until the evidence changes or the date
+  passes. "Hand to EZ Coder" is a brief to copy: DAVE refuses to start it.
+- **Pew.** When you ask, Pew reads `GET /api/intel/briefing?caller=pew` for the next
+  action, what moved since you last asked (remembered by DAVE, so restarts don't reset
+  it) and the decisions waiting. With your spoken yes, Pew can answer, skip or defer
+  that action and clean up noise. Only Pew starts EZ Coder, through its own
+  `delegate_backlog_item` and after your yes.
+- **How DAVE's picks compared with yours.** Every recommendation is logged and later
+  marked followed, overridden, skipped, deferred, superseded or expired, with what you
+  did instead. The panel on Focus shows the agreement rate, recent overrides and
+  patterns, and can suggest a priority change. Nothing changes until you click it.
+
+Code: `src/work/`, `src/intel/prepare.ts`, `src/intel/next.ts`, `src/intel/briefing.ts`,
+`src/intel/ledger.ts`, `src/intel/review.ts`. Routes sit under the guarded `/api/intel`
+prefix. For UI work, `node --experimental-strip-types test/fixtures/seed-ui.ts <tmp dir>`
+builds an isolated fixture home, and `test/fixtures/serve-ui.ts <tmp dir>` (with `HOME`
+and `PCC_HOME` set as it asks) serves it without schedulers, Keychain or network.
 
 ## Delivery order and task lists
 

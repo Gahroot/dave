@@ -5,7 +5,7 @@ import { batchLine, bucketState, canMarkDone, defaultSelection, groupByBucket, p
 const entry = (key: string, bucket: TriageBucket, kind: TriageKind = "promise", confirmed = false, project: string | null = null): TriageEntry =>
   ({ key, kind, bucket, title: key, projectId: project, projectName: project ? `P ${project}` : null, dueDate: null, meetingAt: null, meetingTitle: null, reasons: [], confirmed });
 const counts = (c: Partial<Record<TriageBucket, number>>): Record<TriageBucket, number> =>
-  ({ overdue_promises: 0, stale_promises: 0, looks_done: 0, old_asks: 0, meeting_decisions: 0, ...c });
+  ({ overdue_promises: 0, stale_promises: 0, looks_done: 0, old_asks: 0, meeting_decisions: 0, ideas: 0, ...c });
 const result = (r: Partial<TriageResult>): TriageResult => ({ batchId: "tb-1", changed: 0, skipped: [], kept: [], summary: "", ...r });
 
 describe("cleanup model", () => {

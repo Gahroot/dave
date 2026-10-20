@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { memoryKeyStore } from "../src/meetings/credentials.ts";
 import { buildServer } from "../src/server/index.ts";
+import { parseFilter } from "../src/server/triage-routes.ts";
 import { sourcePaths } from "../src/shared/paths.ts";
 import type { Portfolio } from "../src/shared/types.ts";
 import { tempDir, writeJson, writeText } from "./helpers.ts";
@@ -43,8 +44,8 @@ async function fixture() {
   seed.exec("PRAGMA busy_timeout = 5000");
   seed.prepare(`INSERT INTO meetings(recording_id, title, created_at, started_at, status, project_id, project_source, first_seen_at, updated_at)
     VALUES ('100', 'Acme weekly', ?, ?, 'analyzed', ?, 'user', ?, ?)`).run(old, old, projectId, old, old);
-  const insert = seed.prepare(`INSERT INTO meeting_items(id, recording_id, kind, text, quote, at_seconds, speaker, speaker_role, project_id, due_date, status, status_source, created_at, updated_at)
-    VALUES (?, '100', 'commitment', ?, 'SENTINEL quote', 30, 'Dave', 'me', ?, ?, 'open', ?, ?, ?)`);
+  const insert = seed.prepare(`INSERT INTO meeting_items(id, recording_id, kind, text, quote, at_seconds, speaker, speaker_role, project_id, due_date, status, status_source, strength, strength_source, created_at, updated_at)
+    VALUES (?, '100', 'commitment', ?, 'SENTINEL quote', 30, 'Dave', 'me', ?, ?, 'open', ?, 'firm', 'model', ?, ?)`);
   insert.run(PROMISE, "Send the API docs", projectId, old.slice(0, 10), "model", old, old);
   insert.run(SECOND, "Book the training session", projectId, null, "model", old, old);
   insert.run(USER_SET, "Fix the login page", projectId, null, "user", old, old);
@@ -118,5 +119,14 @@ describe("triage routes", () => {
     expect(f.status(SECOND)).toMatchObject({ status: "dropped", status_source: "user", status_note: "Rejected in Decisions" });
     expect((await f.post(`/api/intel/proposals/${userSet?.id}/reject`, {})).statusCode).toBe(200);
     expect(f.status(USER_SET)).toMatchObject({ status: "open", status_source: "user" });
+  });
+});
+
+describe("parseFilter", () => {
+  it("accepts the ideas bucket and a recording id, and refuses a malformed recording id", () => {
+    expect(parseFilter({ buckets: ["ideas"], recordingId: "12345" })).toEqual({ buckets: ["ideas"], recordingId: "12345" });
+    expect(() => parseFilter({ recordingId: "../etc" })).toThrow("Invalid request");
+    expect(() => parseFilter({ recordingId: "" })).toThrow("Invalid request");
+    expect(() => parseFilter({ recordingId: 12 })).toThrow("Invalid request");
   });
 });

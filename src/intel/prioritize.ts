@@ -184,13 +184,14 @@ function evidenceOf(targets: IntelItem[]): Provenance[] {
   return out.slice(0, 6);
 }
 
-export function briefFor(o: Pick<Objective, "objective" | "whyNow" | "definitionOfDone" | "blockers" | "evidence" | "projectName" | "dueDate">): string {
+export function briefFor(o: Pick<Objective, "id" | "targetItemIds" | "objective" | "whyNow" | "definitionOfDone" | "blockers" | "evidence" | "projectName" | "dueDate">): string {
   const lines = [`Objective: ${o.objective}`, `Project: ${o.projectName}`, `Why now: ${o.whyNow}`];
   if (o.dueDate) lines.push(`Date: ${o.dueDate}`);
   lines.push("Definition of done:", ...o.definitionOfDone.map((d) => `- ${d}`));
   const ctx = o.evidence.filter((e) => e.quote).slice(0, 3).map((e) => `- ${e.label}: "${trim(e.quote ?? "", 160)}"`);
   if (ctx.length) lines.push("Context from the client:", ...ctx);
   lines.push("Constraints: stay within this objective; do not deploy, merge or contact the client; report what you changed and how you checked it so a person can verify it.");
+  lines.push("", `DAVE-Objective: ${o.id}`, `DAVE-Items: ${o.targetItemIds.join(",")}`, `When you commit, add the trailer \`DAVE-Objective: ${o.id}\`.`);
   return lines.join("\n");
 }
 

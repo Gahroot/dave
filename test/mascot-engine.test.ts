@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDaveBody, DAVE_LOD_PX, daveEnergy, eyeOpenness, mouthLevel, paintDave, paintStaticDave, projectFront, stepDave, type DaveBody, type DavePainter, type DaveStepInput } from "../src/ui/mascot/engine.ts";
 import { FONT_5X7, GLYPH_H, GLYPH_W, glyphFor, layoutLedText } from "../src/ui/mascot/font5x7.ts";
-import { contrast, DAVE_PALETTE } from "../src/ui/mascot/palette.ts";
+import { contrast, DAVE_FORCED_PALETTE, DAVE_LIGHT_PALETTE, DAVE_PALETTE, davePalette } from "../src/ui/mascot/palette.ts";
 import { DAVE_MOODS } from "../src/ui/mascot/types.ts";
 
 type Call = { op: string; args: (number | string | undefined)[] };
@@ -173,6 +173,101 @@ describe("DAVE bot 3D", () => {
   });
 });
 
+describe("DAVE bot top hat and monocle", () => {
+  /** A recorder that also records filled polygons as { op: "poly", args: [fill, stroke, ...points] }. */
+  const polyRecorder = () => {
+    const r = recorder();
+    return Object.assign(r, { poly: (pts: readonly number[], fill: string, stroke?: string) => { r.calls.push({ op: "poly", args: [fill, stroke, ...pts] }); } });
+  };
+  const polysIn = (calls: Call[], fill: string) => calls.filter((c) => c.op === "poly" && c.args[0] === fill).map((c) => c.args.slice(2).map(Number));
+  const minY = (pts: number[]) => Math.min(...pts.filter((_, i) => i % 2 === 1));
+  const hatTop = (calls: Call[]) => Math.min(...polysIn(calls, DAVE_PALETTE.hat).map(minY));
+  const headTop = (b: DaveBody, t: number) => Math.min(...projectFront(b, t, 180).map((p) => p.y));
+
+  it("wears a top hat on the crown instead of an antenna", () => {
+    const b = createDaveBody(1);
+    stepDave(b, 0, { mood: "idle" });
+    const p = polyRecorder();
+    const stats = paintDave(b, 0, p, DAVE_PALETTE, 180);
+    expect(polysIn(p.calls, DAVE_PALETTE.hat).length).toBeGreaterThanOrEqual(2);
+    expect(stats.hat).toBeGreaterThan(20);
+    expect(hatTop(p.calls)).toBeLessThan(headTop(b, 0) - 25);
+    // The only strokes left are the monocle's rim: no antenna stalk.
+    const lines = p.calls.filter((c) => c.op === "line");
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((c) => c.args[4] === DAVE_PALETTE.monocle)).toBe(true);
+  });
+
+  it("lights the hat band with the mic level while listening", () => {
+    const band = (input: number) => {
+      const b = createDaveBody(1);
+      run(b, 0.5, { mood: "listening", input });
+      const p = recorder();
+      paintDave(b, b.time, p, DAVE_PALETTE, 180);
+      const top = headTop(b, b.time);
+      return p.calls.filter((c) => c.op === "dot" && c.args[3] === DAVE_PALETTE.lit && Number(c.args[1]) < top).reduce((sum, c) => sum + Number(c.args[4] ?? 1), 0);
+    };
+    expect(band(0)).toBeGreaterThan(0);
+    expect(band(0.9)).toBeGreaterThan(band(0) * 2);
+  });
+
+  it("tips the hat when poked", () => {
+    const top = (poked: boolean) => {
+      const b = createDaveBody(6);
+      run(b, 0.5, { mood: "idle" });
+      stepDave(b, 1 / 60, { mood: "idle", poke: poked });
+      run(b, 0.4, { mood: "idle" });
+      const p = polyRecorder();
+      paintDave(b, b.time, p, DAVE_PALETTE, 180);
+      return hatTop(p.calls);
+    };
+    expect(top(false) - top(true)).toBeGreaterThan(3);
+  });
+
+  it("wears the monocle over DAVE's right eye and hides it when turned away", () => {
+    const b = createDaveBody(1);
+    stepDave(b, 0, { mood: "listening" });
+    const p = recorder();
+    const front = paintDave(b, 0, p, DAVE_PALETTE, 180);
+    expect(front.monocle).toBeGreaterThan(30);
+    const beads = p.calls.filter((c) => c.op === "dot" && c.args[3] === DAVE_PALETTE.monocle).map((c) => Number(c.args[0]));
+    expect(beads.reduce((s, x) => s + x, 0) / beads.length).toBeLessThan(90);
+    b.spin.yaw = Math.PI;
+    const q = recorder();
+    const back = paintDave(b, 0, q, DAVE_PALETTE, 180);
+    expect(back.monocle).toBe(0);
+    expect(q.calls.some((c) => c.op === "line" || (c.op === "dot" && c.args[3] === DAVE_PALETTE.monocle))).toBe(false);
+    expect(back.hat).toBeGreaterThan(0);
+  });
+
+  it("keeps the hat and monocle inside the canvas in every mood, even mid-poke and looking up", () => {
+    const HAT_AND_MONOCLE = new Set([DAVE_PALETTE.hatDot, DAVE_PALETTE.monocle, DAVE_PALETTE.glint]);
+    const out: string[] = [];
+    for (const mood of DAVE_MOODS) {
+      for (const size of [64, 180]) {
+        const b = createDaveBody(0xda7e);
+        for (let i = 0; i < 240; i++) {
+          stepDave(b, 1 / 60, { mood, input: 0.5, output: 0.5, look: { x: Math.sin(i / 20), y: -1 }, poke: i % 60 === 10 });
+          if (i % 6 !== 0) continue;
+          const p = polyRecorder();
+          paintDave(b, b.time, p, DAVE_PALETTE, size);
+          for (const c of p.calls) {
+            // Hat and monocle only: their polygons, the rim strokes and their own dot colours (band, felt, beads, glint).
+            if (c.op === "glow" || c.op === "ellipse" || (c.op === "dot" && !HAT_AND_MONOCLE.has(String(c.args[3])))) continue;
+            const nums = c.op === "poly" ? c.args.slice(2).map(Number) : c.op === "line" ? c.args.slice(0, 4).map(Number) : c.args.slice(0, 2).map(Number);
+            const r = c.op === "dot" ? Number(c.args[2]) : 0;
+            for (let k = 0; k < nums.length; k++) {
+              const v = nums[k] ?? 0;
+              if (v - r < -0.5 || v + r > size + 0.5) { out.push(`${mood} ${size}px step ${i}: ${c.op}`); break; }
+            }
+          }
+        }
+      }
+    }
+    expect([...new Set(out)]).toEqual([]);
+  });
+});
+
 describe("LED font", () => {
   it("covers A-Z, 0-9 and punctuation with 5x7 glyphs", () => {
     const chars = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", ".", ",", ":", "!", "?", "-", "'", "/", "…", " "];
@@ -195,5 +290,28 @@ describe("palette", () => {
       expect(contrast(c, DAVE_PALETTE.background), c).toBeGreaterThanOrEqual(4.5);
     }
     expect(contrast("#000", "#fff")).toBeCloseTo(21, 5);
+  });
+
+  it("keeps the light stage's LEDs at 4.5:1 on the stage and on DAVE's pearl head", () => {
+    for (const c of [DAVE_LIGHT_PALETTE.lit, DAVE_LIGHT_PALETTE.light, DAVE_LIGHT_PALETTE.oops]) {
+      expect(contrast(c, DAVE_LIGHT_PALETTE.background), c).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(c, DAVE_LIGHT_PALETTE.shell), c).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(contrast(DAVE_LIGHT_PALETTE.hat, DAVE_LIGHT_PALETTE.background)).toBeGreaterThanOrEqual(3);
+    expect(contrast(DAVE_LIGHT_PALETTE.monocle, DAVE_LIGHT_PALETTE.shell)).toBeGreaterThanOrEqual(3);
+    expect(contrast(DAVE_PALETTE.hatStroke, DAVE_PALETTE.background)).toBeGreaterThanOrEqual(3);
+    expect(contrast(DAVE_PALETTE.monocle, DAVE_PALETTE.shell)).toBeGreaterThanOrEqual(3);
+  });
+
+  it("picks the palette by theme, with forced colors winning", () => {
+    expect(davePalette("dark", false)).toBe(DAVE_PALETTE);
+    expect(davePalette("light", false)).toBe(DAVE_LIGHT_PALETTE);
+    expect(davePalette("light", true)).toBe(DAVE_FORCED_PALETTE);
+    const LIGHT_LIT = new Set([DAVE_LIGHT_PALETTE.lit, DAVE_LIGHT_PALETTE.light, DAVE_LIGHT_PALETTE.oops]);
+    for (const mood of DAVE_MOODS) {
+      const p = recorder();
+      paintStaticDave(mood, p, DAVE_LIGHT_PALETTE, 180);
+      expect(p.calls.filter((c) => c.op === "dot" && LIGHT_LIT.has(String(c.args[3])) && Number(c.args[4] ?? 1) > 0.5).length, mood).toBeGreaterThan(4);
+    }
   });
 });

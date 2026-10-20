@@ -36,6 +36,8 @@ export type ObjectiveSnapshot = { projectId: string; objectiveId: string; object
 export type NewProposal = {
   projectId: string; kind: ProposalKind; material: boolean; summary: string; detail?: string | null;
   itemId?: string | null; patch?: Record<string, unknown>; provenance?: Provenance[];
+  /** Only a pending identical proposal blocks this one; an earlier accepted or rejected one does not (a restored promise). */
+  fresh?: boolean;
 };
 
 export function mapItem(r: Row): IntelItem {
@@ -128,13 +130,23 @@ export function intelStore(db: Db, names: (projectId: string) => string = (id) =
     proposal: (id: string): Proposal | null => { const r = q.proposal.get(id) as Row | undefined; return r ? mapProposal(r) : null; },
     proposals: (projectId: string): Proposal[] => (q.proposals.all(projectId) as Row[]).map(mapProposal),
     pendingProposals: (): Proposal[] => (q.pending.all() as Row[]).map(mapProposal),
-    /** Idempotent: identical content (same id) is never proposed twice, even after it was accepted or rejected. */
+    /**
+     * Idempotent: identical content (same id) is never proposed twice, even after it was accepted or rejected, unless
+     * `fresh` is set: then only a pending identical proposal blocks it.
+     */
     addProposal(p: NewProposal, now: string): Proposal | null {
       // Identity is the subject (item or normalised summary) plus the specific change, so rephrased repeats collapse.
       const patch = p.patch ?? {};
       const change = patch.fields ? JSON.stringify(patch.fields) : typeof patch.code === "string" ? patch.code : "";
-      const id = hash("proposal", p.projectId, p.kind, p.itemId ?? normaliseKey(p.summary), change);
-      if (q.proposal.get(id)) return null;
+      const base = hash("proposal", p.projectId, p.kind, p.itemId ?? normaliseKey(p.summary), change);
+      let id = base;
+      for (let n = 1; ; n++) {
+        const existing = q.proposal.get(id) as Row | undefined;
+        if (!existing) break;
+        // Pending always blocks. Resolved blocks too, unless this is a fresh proposal (then the next numbered id is tried).
+        if (existing.status === "pending" || !p.fresh) return null;
+        id = hash(base, String(n));
+      }
       q.insertProposal.run(id, p.projectId, p.kind, p.material ? 1 : 0, p.summary, p.detail ?? null, p.itemId ?? null,
         JSON.stringify(p.patch ?? {}), JSON.stringify(p.provenance ?? []), now);
       return mapProposal(q.proposal.get(id) as Row);

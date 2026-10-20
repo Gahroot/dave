@@ -1,16 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type { MeetingItem, MeetingsState, SyncRun } from "../src/meetings/types.ts";
-import { connectionSummary, groupPromises, promiseGroup, runSummary, timestamp } from "../src/ui/meetings-model.ts";
+import { IDEA_KIND_LABELS, connectionSummary, groupPromises, promiseGroup, runSummary, shortDay, timestamp } from "../src/ui/meetings-model.ts";
 
 const NOW = new Date(2026, 8, 30, 12, 0, 0);
 const item = (over: Partial<MeetingItem>): MeetingItem => ({
   id: "mi-1", recordingId: "1", kind: "commitment", text: "t", quote: "q", atSeconds: 0, speaker: "Dave", speakerRole: "me",
   projectId: "p1", projectName: "Acme", projectSource: "model", duePhrase: null, dueDate: null, feature: null, status: "open",
-  suggestedStatus: null, statusSource: "model", statusNote: null, statusChangedAt: null, edited: false, agentRunId: null,
+  suggestedStatus: null, statusSource: "model", statusNote: null, statusChangedAt: null, edited: false, agentRunId: null, strength: "firm", strengthSource: null, deliverable: null,
   createdAt: "", updatedAt: "", meetingTitle: "Weekly", meetingAt: "2026-09-28T16:00:00.000Z", meetingUrl: null, ...over,
 });
 
 describe("meetings page model", () => {
+  it("shows a date-only due date as that local day, not the UTC-midnight day before", () => {
+    expect(shortDay("2026-10-21")).toBe(new Date(2026, 9, 21).toLocaleDateString([], { month: "short", day: "numeric" }));
+    expect(shortDay("not a date")).toBe("");
+  });
+
+  it("never labels an idea as a promise or an agreed decision", () => {
+    for (const label of Object.values(IDEA_KIND_LABELS)) expect(label).not.toMatch(/promise|decision/i);
+  });
+
   it.each([
     [{ dueDate: "2026-09-29" }, "overdue"],
     [{ dueDate: "2026-09-30" }, "due_soon"],

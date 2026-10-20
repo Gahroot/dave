@@ -7,7 +7,7 @@ const item = (over: Partial<MeetingItem> = {}): MeetingItem => ({
   id: 'mi-1', recordingId: '100', kind: 'commitment', text: 'Send the API docs', quote: "I'll send the API docs by Friday",
   atSeconds: 95, speaker: 'Dave Owner', speakerRole: 'me', projectId: 'p1', projectName: 'Acme', projectSource: 'model',
   duePhrase: null, dueDate: null, feature: null, status: 'open', suggestedStatus: null, statusSource: 'model', statusNote: null, statusChangedAt: null,
-  edited: false, agentRunId: null, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+  edited: false, agentRunId: null, strength: "firm", strengthSource: null, deliverable: null, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
   meetingTitle: 'Acme weekly', meetingAt: '2026-09-28T16:00:00.000Z', meetingUrl: 'https://fathom.video/calls/100',
   ...over,
 });

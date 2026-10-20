@@ -6,7 +6,7 @@ import { MEETING_STATUS as MEETING_MARK, PROMISE_GROUP } from "../status.ts";
 import type { MeetingItem, MeetingRow, MeetingsState } from "../../meetings/types.ts";
 import { deliveryApi } from "../delivery-api.ts";
 import { relative } from "../format.ts";
-import { groupPromises, MEETING_STATUS_LABELS } from "../meetings-model.ts";
+import { firmOnly, groupPromises, MEETING_STATUS_LABELS } from "../meetings-model.ts";
 import { parseRoute, routeLink, type MeetingSection } from "../navigation.ts";
 import { EmptyState, PageHeader, PanelHead } from "../components/WorkspacePrimitives.tsx";
 import { MeetingItemRow, type ItemAction } from "../components/MeetingItemRow.tsx";
@@ -69,8 +69,10 @@ export function MeetingsView({ route, paused = false, refreshedAt = null }: { ro
   if (navigation.rec) return <MeetingDetail recordingId={navigation.rec} back={routeLink("meetings", { section: "list" })} state={state} onChanged={reload} paused={paused} />;
 
   const connected = !!state?.key.saved && !!state.settings.connectedAt;
-  const promiseGroups = items ? groupPromises(items.promises, new Date()) : [];
-  const count = (id: MeetingSection) => id === "promises" ? items?.promises.length : id === "asks" ? items?.asks.length : id === "list" ? meetings?.length : undefined;
+  // Ideas mentioned are not promises or asks: they stay on their meeting's page.
+  const promises = items ? firmOnly(items.promises) : [], asks = items ? firmOnly(items.asks) : [];
+  const promiseGroups = groupPromises(promises, new Date());
+  const count = (id: MeetingSection) => id === "promises" ? promises.length : id === "asks" ? asks.length : id === "list" ? meetings?.length : undefined;
   return <Stack gap="md">
     <PageHeader title="Meetings" actions={<Button component="a" href={routeLink("connections")} variant="subtle" color="dark" leftSection={<Settings size={16} aria-hidden="true" />}>Fathom settings</Button>} />
     {state && <div className="count-strip" role="group" aria-label="Meeting sync">
@@ -93,9 +95,9 @@ export function MeetingsView({ route, paused = false, refreshedAt = null }: { ro
         <ul className="meeting-list">{group.items.map(item => <MeetingItemRow key={item.id} item={item} busy={busyId === item.id} onAction={onAction} returnTo={here} showKind={false} />)}</ul>
       </section>))}
 
-    {section === "asks" && items && (items.asks.length === 0
+    {section === "asks" && items && (asks.length === 0
       ? <div className="app-panel"><EmptyState title="No open client asks">Suggestions and pain points your clients raise appear here, each pain point with a small feature idea.</EmptyState></div>
-      : <section className="app-panel" aria-label="Client asks"><ul className="meeting-list">{items.asks.map(item => <MeetingItemRow key={item.id} item={item} busy={busyId === item.id} onAction={onAction} returnTo={here} />)}</ul></section>)}
+      : <section className="app-panel" aria-label="Client asks"><ul className="meeting-list">{asks.map(item => <MeetingItemRow key={item.id} item={item} busy={busyId === item.id} onAction={onAction} returnTo={here} />)}</ul></section>)}
 
     {section === "list" && meetings && (meetings.length === 0
       ? <div className="app-panel"><EmptyState title="No meetings imported yet">{connected ? "DAVE checks Fathom every 5 minutes." : "Connect Fathom to start."}</EmptyState></div>

@@ -16,7 +16,7 @@
  */
 
 /** Buckets in display order. Each entry sits in exactly one bucket. */
-export const TRIAGE_BUCKETS = ["overdue_promises", "stale_promises", "looks_done", "old_asks", "meeting_decisions"] as const;
+export const TRIAGE_BUCKETS = ["overdue_promises", "stale_promises", "looks_done", "old_asks", "meeting_decisions", "ideas"] as const;
 export type TriageBucket = (typeof TRIAGE_BUCKETS)[number];
 
 export const BUCKET_LABEL: Record<TriageBucket, string> = {
@@ -25,6 +25,7 @@ export const BUCKET_LABEL: Record<TriageBucket, string> = {
   looks_done: "Looks done",
   old_asks: "Old client asks",
   meeting_decisions: "Drafted decisions from meetings",
+  ideas: "Ideas, not promises",
 };
 
 /** One-line explanation of what puts an entry in each bucket. */
@@ -34,6 +35,7 @@ export const BUCKET_NOTE: Record<TriageBucket, string> = {
   looks_done: "Promises and asks DAVE thinks are already done or dropped.",
   old_asks: "Open client suggestions and pain points from a meeting at least 30 days ago.",
   meeting_decisions: "Decisions DAVE drafted from meetings that are still waiting on you.",
+  ideas: "Open maybes and brainstormed ideas from meetings. They never became promises.",
 };
 
 /** A promise with no due date (or a future one) counts as stale once its meeting is this old. */
@@ -64,6 +66,8 @@ export type TriageEntry = {
   /** When the meeting behind it happened (ISO), when known. */
   meetingAt: string | null;
   meetingTitle: string | null;
+  /** The meeting behind it (Fathom recording id), when there is one. */
+  recordingId?: string | null;
   /** Plain reasons, e.g. "Due 12 Sep, 36 days ago", "From a meeting 5 weeks ago", "Never confirmed". */
   reasons: string[];
   /** You already acted on it (set its status, edited it, or confirmed or locked the plan item). Never preselected. */
@@ -84,7 +88,12 @@ export type TriageFilter = {
   text?: string;
   /** Only these keys. */
   keys?: string[];
+  /** Only entries from this meeting (Fathom recording id). */
+  recordingId?: string;
 };
+
+/** A recording id accepted by the `recordingId` filter. */
+export const TRIAGE_RECORDING_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 /** clear: drop it everywhere. done: mark it done (promises and "looks done" entries only). */
 export type TriageAction = "clear" | "done";

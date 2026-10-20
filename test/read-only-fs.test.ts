@@ -45,4 +45,10 @@ describe("readOnlyFs", () => {
       expect(banned in readOnlyFs).toBe(false);
     }
   });
+  it("reads a bounded tail and refuses deny-listed files", async () => {
+    fs.writeFileSync(path.join(tmp, "log.jsonl"), "line one\nline two\n");
+    expect(await readOnlyFs.readTail(path.join(tmp, "log.jsonl"), 9)).toBe("line two\n");
+    expect(await readOnlyFs.readTail(path.join(tmp, "log.jsonl"), 1000)).toBe("line one\nline two\n");
+    await expect(readOnlyFs.readTail(path.join(tmp, ".env"), 10)).rejects.toBeInstanceOf(DeniedPathError);
+  });
 });

@@ -169,3 +169,27 @@ describe("triage decisions", () => {
     expect(done.skipped).toEqual([{ key: `p:${confirm?.id}`, reason: "gone" }]);
   });
 });
+
+describe("triage: ideas bucket", () => {
+  it("lists open tentative items only in ideas, filters by meeting, and clears and undoes them", async () => {
+    const t = setup();
+    h.addItem({ id: "idea1", recordingId: "100", text: "We could maybe add export", strength: "tentative" });
+    h.addItem({ id: "idea2", recordingId: "200", kind: "suggestion", role: "client", text: "It would be nice to have dark mode", strength: "tentative" });
+    h.addItem({ id: "firm1", recordingId: "100", text: "Send the API docs", due: "2026-10-01" });
+    const all = t.triage.preview();
+    expect(all.entries.filter((e) => e.bucket === "ideas").map((e) => e.key).sort()).toEqual(["m:idea1", "m:idea2"]);
+    expect(all.entries.filter((e) => e.key === "m:idea1")).toHaveLength(1);
+    expect(all.entries.find((e) => e.key === "m:firm1")?.bucket).toBe("overdue_promises");
+    const one = t.triage.preview({ buckets: ["ideas"], recordingId: "100" });
+    expect(one.entries.map((e) => e.key)).toEqual(["m:idea1"]);
+    expect(one.entries[0]?.recordingId).toBe("100");
+
+    const res = t.triage.apply({ keys: ["m:idea1", "m:idea2"], action: "clear", source: "voice" });
+    expect(res.changed).toBe(2);
+    expect(meeting("idea1")).toMatchObject({ status: "dropped", status_source: "user" });
+    expect(t.triage.preview({ buckets: ["ideas"] }).total).toBe(0);
+    expect(t.triage.undo(res.batchId!)).toEqual({ restored: 2, skipped: 0 });
+    expect(meeting("idea2")).toMatchObject({ status: "open" });
+    expect(t.triage.preview({ buckets: ["ideas"] }).total).toBe(2);
+  });
+});

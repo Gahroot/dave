@@ -10,17 +10,19 @@ import type { DocumentMeta, ToolCallResponse } from "../src/voice/types.ts";
 import type { MeetingItem } from "../src/meetings/types.ts";
 import type { Portfolio } from "../src/shared/types.ts";
 import type { VoiceTriage } from "../src/voice/deps.ts";
-import { TRIAGE_BUCKETS, type TriageBatch, type TriageEntry, type TriageBucket } from "../src/triage/types.ts";
+import { TRIAGE_BUCKETS, type TriageBatch, type TriageEntry, type TriageBucket, type TriageFilter } from "../src/triage/types.ts";
 
 const entry = (n: number, bucket: TriageBucket = "overdue_promises"): TriageEntry => ({
   key: `m:mi-${String(n).padStart(24, "0")}`, kind: "promise", bucket, title: `Promise ${n}`, projectId: "p1", projectName: "Acme",
   dueDate: "2026-09-01", meetingAt: null, meetingTitle: "Call", reasons: [`Due 1 Sep, reason ${n}`], confirmed: false,
 });
 function fakeTriage() {
-  const state = { entries: [] as TriageEntry[], applied: [] as { keys: readonly string[]; action: string; source: string }[], batches: [] as TriageBatch[], undone: [] as string[] };
+  const state = { filters: [] as TriageFilter[], entries: [] as TriageEntry[], applied: [] as { keys: readonly string[]; action: string; source: string }[], batches: [] as TriageBatch[], undone: [] as string[] };
   const triage: VoiceTriage = {
     preview: (filter = {}) => {
-      const entries = state.entries.filter((e) => (!filter.keys || filter.keys.includes(e.key)) && (!filter.buckets || filter.buckets.includes(e.bucket)) && (!filter.projectId || e.projectId === filter.projectId));
+      state.filters.push(filter);
+      const entries = state.entries.filter((e) => (!filter.keys || filter.keys.includes(e.key)) && (!filter.buckets || filter.buckets.includes(e.bucket)) && (!filter.projectId || e.projectId === filter.projectId) &&
+        (!filter.recordingId || e.recordingId === filter.recordingId));
       const counts = Object.fromEntries(TRIAGE_BUCKETS.map((b) => [b, entries.filter((e) => e.bucket === b).length])) as Record<TriageBucket, number>;
       return { generatedAt: "x", entries, counts, total: entries.length, confirmedHidden: 0 };
     },
@@ -70,6 +72,8 @@ const meetingItem = { id: "mi-000000000000000000000001", recordingId: "1", kind:
   projectId: "p1", projectName: "Acme", projectSource: "user", duePhrase: null, dueDate: "2026-10-20", feature: null, status: "open", suggestedStatus: null, statusSource: "model",
   statusNote: null, statusChangedAt: null, edited: false, agentRunId: null, createdAt: "x", updatedAt: "x", meetingTitle: "Call" } as unknown as MeetingItem;
 
+const ideaItem = { ...meetingItem, id: "mi-000000000000000000000002", text: "Maybe add a CSV export", strength: "tentative" } as unknown as MeetingItem;
+
 function setup() {
   const h = intelHarness([{ id: "p1", name: "Acme" }, { id: "p2", name: "Acme Mobile" }, { id: "p3", name: "Beta" }]);
   harnesses.push(h);
@@ -78,7 +82,10 @@ function setup() {
   const dir = fakeDirection();
   const intel: VoiceIntel = { ...h.intel, ...dir };
   const statusCalls: string[] = [];
-  const meetings: VoiceMeetings = { items: () => [meetingItem], setItemStatus: (_id, a) => { statusCalls.push(String(a)); return meetingItem; }, syncNow: () => undefined, fathomConnected: () => false };
+  const strengthCalls: string[] = [];
+  const recent = [{ recordingId: "rec-kick", title: "Acme kickoff", at: "2026-10-01T10:00:00Z" }, { recordingId: "rec-w1", title: "Weekly sync one", at: null }, { recordingId: "rec-w2", title: "Weekly sync two", at: null }];
+  const meetings: VoiceMeetings = { items: () => [meetingItem, ideaItem], setItemStatus: (_id, a) => { statusCalls.push(String(a)); return meetingItem; }, syncNow: () => undefined, fathomConnected: () => false,
+    setItemStrength: (id, s) => { strengthCalls.push(`${id}:${s}`); return ideaItem; }, recentMeetings: (limit) => recent.slice(0, limit) };
   const pf: Portfolio = { generatedAt: "x", active: [], other: [], hidden: [], today: [], inbox: [], issues: [] };
   const portfolio: VoicePortfolio = { refresh: async () => pf, current: async () => pf, attention: () => pf, override: () => true };
   const documents = fakeDocuments();
@@ -90,15 +97,15 @@ function setup() {
   const batches: string[] = [];
   const call = (name: string, args: Record<string, unknown> = {}, sessionId = "s1", projectId: string | null = null, autoApprove = false) => exec.execute({ sessionId, projectId, autoApprove, batches }, { callId: `c${++n}`, name, args });
   const out = (r: ToolCallResponse) => JSON.parse(r.output) as Record<string, unknown>;
-  return { h, db: h.db, tri, batches, dir, documents, exec, call, out, statusCalls, advance: (ms: number) => { clock = new Date(clock.getTime() + ms); } };
+  return { h, db: h.db, tri, batches, strengthCalls, dir, documents, exec, call, out, statusCalls, advance: (ms: number) => { clock = new Date(clock.getTime() + ms); } };
 }
 
 describe("voice tools", () => {
   it("defines the agreed tool list, nothing dangerous", () => {
     const names = VOICE_TOOLS.map((t) => t.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(42);
-    for (const added of ["approve_session", "find_noise", "clean_up", "undo_clean_up"]) expect(names).toContain(added);
+    expect(names).toHaveLength(44);
+    for (const added of ["approve_session", "find_noise", "clean_up", "undo_clean_up", "promote_idea", "demote_promise"]) expect(names).toContain(added);
     for (const banned of ["launch_agent", "disconnect_openai", "connect_openai", "hide_project", "fathom_key", "agent_desk"]) expect(names).not.toContain(banned);
   });
 
@@ -286,6 +293,59 @@ describe("voice tools", () => {
     expect(f.out(u).say).toContain("Restored 2 items");
     expect(f.tri.state.undone).toEqual([id]);
     expect((await f.call("undo_clean_up")).ok).toBe(false);
+  });
+
+  it("find_noise scopes by project, meeting, ideas bucket and age, with counts per project", async () => {
+    const f = setup();
+    const idea = (n: number, projectId: string, projectName: string): TriageEntry => ({ ...entry(n, "ideas"), kind: "promise", projectId, projectName, recordingId: "rec-kick" });
+    f.tri.state.entries = [idea(1, "p1", "Acme"), idea(2, "p1", "Acme"), idea(3, "p3", "Beta"), { ...entry(4), recordingId: "rec-w1" }];
+    const all = f.out(await f.call("find_noise", { bucket: "ideas", meeting: "kickoff", olderThanDays: 7 }));
+    expect(f.tri.state.filters.at(-1)).toEqual({ buckets: ["ideas"], recordingId: "rec-kick", olderThanDays: 7 });
+    expect(all.total).toBe(3);
+    expect(all.byProject).toEqual([{ project: "Acme", count: 2 }, { project: "Beta", count: 1 }]);
+    expect(all.meeting).toBe("Acme kickoff");
+    const beta = f.out(await f.call("find_noise", { bucket: "ideas", project: "beta" }));
+    expect(f.tri.state.filters.at(-1)).toEqual({ buckets: ["ideas"], projectId: "p3" });
+    expect(beta.byProject).toEqual([{ project: "Beta", count: 1 }]);
+    const amb = await f.call("find_noise", { meeting: "weekly sync" });
+    expect(amb.ok).toBe(false);
+    expect(f.out(amb)).toMatchObject({ ambiguous: true });
+    const none = await f.call("find_noise", { meeting: "board review" });
+    expect(f.out(none)).toMatchObject({ notFound: true });
+    expect((await f.call("find_noise", { olderThanDays: -1 })).ok).toBe(false);
+  });
+
+  it("clean_up of ideas from one meeting and project applies exactly the scoped keys", async () => {
+    const f = setup();
+    const idea = (n: number, projectId: string, projectName: string, recordingId: string): TriageEntry => ({ ...entry(n, "ideas"), projectId, projectName, recordingId });
+    f.tri.state.entries = [idea(1, "p1", "Acme", "rec-kick"), idea(2, "p1", "Acme", "rec-w1"), idea(3, "p3", "Beta", "rec-kick")];
+    const p = await f.call("clean_up", { buckets: ["ideas"], project: "Acme", meeting: "Acme kickoff", olderThanDays: 3 });
+    expect(f.tri.state.filters.at(-1)).toEqual({ projectId: "p1", recordingId: "rec-kick", buckets: ["ideas"], olderThanDays: 3 });
+    expect(p.confirm?.title).toBe("Clear 1 item");
+    expect(p.confirm?.say).toContain("from Acme kickoff");
+    const yes = await f.call("clean_up", { confirmToken: p.confirm?.token, userConfirmed: true });
+    expect(yes.ok).toBe(true);
+    expect(f.tri.state.applied[0]?.keys).toEqual([entry(1).key]);
+    const across = await f.call("clean_up", { buckets: ["ideas"] });
+    expect(across.confirm?.say).toContain("across 2 in Acme, 1 in Beta");
+  });
+
+  it("promote_idea asks first, then sets the item firm; demote_promise sets a promise tentative", async () => {
+    const f = setup();
+    const p = await f.call("promote_idea", { item: "csv export" });
+    expect(f.out(p).needsConfirmation).toBe(true);
+    expect(f.strengthCalls).toEqual([]);
+    const yes = await f.call("promote_idea", { confirmToken: p.confirm?.token, userConfirmed: true });
+    expect(yes.ok).toBe(true);
+    expect(f.strengthCalls).toEqual(["mi-000000000000000000000002:firm"]);
+    expect(yes.output).not.toContain("SECRET VERBATIM QUOTE");
+    const no = await f.call("demote_promise", { item: "invoice draft" });
+    await f.call("demote_promise", { confirmToken: no.confirm?.token, userConfirmed: false });
+    expect(f.strengthCalls).toHaveLength(1);
+    const d = await f.call("demote_promise", { item: "invoice draft" });
+    await f.call("demote_promise", { confirmToken: d.confirm?.token, userConfirmed: true });
+    expect(f.strengthCalls.at(-1)).toBe("mi-000000000000000000000001:tentative");
+    expect(f.out(await f.call("promote_idea", { item: "something else entirely" }))).toMatchObject({ notFound: true });
   });
 
   it("open_page can show Clean up", async () => {

@@ -6,6 +6,7 @@ import { hash, itemId, type IntelStore } from "./store.ts";
 import { titleMatches } from "./scope.ts";
 import { draftOutcome } from "./outcome.ts";
 import { closableIntelItem } from "../triage/links.ts";
+import type { WorkEvidence } from "../work/types.ts";
 
 /** Everything the reconciler reads for one project. Gathered by the caller so tests need no live sources. */
 export type PlanMilestoneInput = {
@@ -23,6 +24,8 @@ export type ReconcileInput = {
   meetings: { recordingId: string; title: string; at: string; headline: string | null }[];
   milestones: PlanMilestoneInput[];
   sources: SourceHealth[];
+  /** Linked work events (EZ Coder runs, commits, merged PRs) from the work watcher. Optional: absent = none. */
+  workEvents?: WorkEvidence[];
 };
 
 /** Optional enrichment hook. Off by default; nothing in the core rules or the tests calls a model. */
@@ -36,6 +39,10 @@ type Fact = {
   prov: Provenance; closing: "done" | "dropped" | null; fromPlan: PlanMilestoneInput | null;
   /** Who set the meeting item's status (meeting facts only). */
   statusSource?: MeetingItem["statusSource"];
+  /** Who set the meeting item's strength (meeting facts only); 'user' = the owner promoted or kept it. */
+  strengthSource?: MeetingItem["strengthSource"];
+  /** You marked the meeting item a promise, after its last status change. */
+  promotedByYou?: boolean;
 };
 
 const RESOURCE = /(credential|api[ -]?key|password|login|access|token|permission|sandbox|account|secret|certificate|dns|whitelist|invite)/i;
@@ -51,6 +58,11 @@ export const isBlockerText = (text: string, kind: MeetingItem["kind"], speaker: 
 
 const day = (iso: string): string => iso.slice(0, 10);
 const CLOSED_BY_YOU = "Closed by you in Meetings";
+/** Selective meetings: change-log prefix when a meeting promise turns out to be only an idea. Restoring keys off it. */
+export const RECLASSIFIED = "Reclassified as an idea";
+const RECLASSIFIED_NOTE = "Reclassified as an idea";
+const PROMOTED_BY_YOU = "Promoted to a promise by you";
+const KEEP_AS_COMMITMENT = "A meeting now reads this as an idea; keep it as a commitment?";
 
 function meetingProv(m: MeetingItem): Provenance {
   const at = m.meetingAt || m.createdAt;
@@ -62,10 +74,13 @@ function meetingProv(m: MeetingItem): Provenance {
 }
 
 function meetingFact(m: MeetingItem): Fact | null {
+  // Ideas mentioned are not promises, asks or decisions: they feed nothing in the plan.
+  if (m.strength === "tentative") return null;
   const closing: Fact["closing"] = m.status === "done" ? "done" : m.status === "dropped" ? "dropped" : null;
   const prov = meetingProv(m);
   const owner: Owner = m.speakerRole === "me" || m.speakerRole === "teammate" ? "me" : m.speakerRole === "client" ? "client" : "unknown";
-  const base = { detail: null, acceptance: [] as string[], closing, prov, fromPlan: null, statusSource: m.statusSource };
+  const base = { detail: null, acceptance: [] as string[], closing, prov, fromPlan: null, statusSource: m.statusSource, strengthSource: m.strengthSource,
+    promotedByYou: m.strengthSource === "user" && (m.statusChangedAt === null || m.updatedAt > m.statusChangedAt) };
   if (isBlockerText(m.text, m.kind, m.speakerRole)) {
     return { ...base, kind: "blocker", title: m.text, owner: THIRD.test(m.text) ? "third_party" : "client", dueDate: m.dueDate };
   }
@@ -162,6 +177,7 @@ export function reconcileProject(store: IntelStore, input: ReconcileInput, now: 
     }
 
     function updateExisting(item: IntelItem, f: Fact): void {
+      if (f.prov.sourceKind === "meeting" && restoreOrAsk(item, f)) return;
       const isPlan = f.fromPlan !== null;
       const protectedItem = item.locked || item.basis === "confirmed";
       const next: IntelItem = { ...item };
@@ -229,18 +245,92 @@ export function reconcileProject(store: IntelStore, input: ReconcileInput, now: 
       }
     }
 
+    reclassifyIdeas();
+
+    /** Newest item_updated change-log summary for an item, or null. */
+    function lastItemUpdate(id: string): string | null {
+      return store.changes(input.projectId, 500).find((c) => c.itemId === id && c.kind === "item_updated")?.summary ?? null;
+    }
+
+    /**
+     * A firm meeting fact for an item that is closed. Our own "Reclassified as an idea" is reversed: the same item is
+     * reopened with a fresh commitment proposal. Any other close (you dropped it, a meeting cancelled it) stays: when
+     * you promoted the meeting item yourself, one "Confirm commitment again" proposal asks instead. True when handled.
+     */
+    function restoreOrAsk(item: IntelItem, f: Fact): boolean {
+      if (item.status !== "obsolete" && item.status !== "dropped") return false;
+      const ours = item.status === "obsolete" && !item.locked && item.basis === "inferred" && (lastItemUpdate(item.id)?.startsWith(RECLASSIFIED) ?? false);
+      if (ours && !f.closing) {
+        const human: Provenance = { sourceKind: "human", sourceId: null, label: PROMOTED_BY_YOU, quote: null, observedAt: at, confidence: "high", link: null };
+        const withMeeting = withProv(item.provenance, f.prov) ?? item.provenance;
+        const provenance = withProv(withMeeting, human) ?? withMeeting;
+        const observed = item.evidenceState === "implementation_observed" || item.evidenceState === "verified";
+        store.updateItem({ ...item, status: "open", evidenceState: observed ? item.evidenceState : "not_implemented", provenance, updatedAt: at });
+        report.itemsUpdated++;
+        store.addChange({ projectId: input.projectId, kind: "item_updated", summary: `Restored as a promise: ${item.title}`, itemId: item.id, sources: [f.prov.label] }, at);
+        if (item.kind === "commitment") {
+          propose({ projectId: input.projectId, kind: "new_commitment", material: true, itemId: item.id, fresh: true,
+            summary: `Confirm commitment: ${item.title}${item.dueDate ? ` (due ${item.dueDate})` : ""}`, detail: "Inferred from a meeting. Accepting confirms and locks it.",
+            patch: { op: "update_item", itemId: item.id, fields: { basis: "confirmed", locked: true } }, provenance: [f.prov] });
+        }
+        return true;
+      }
+      if (!ours && f.promotedByYou && item.kind === "commitment") {
+        // Never silently undo a deliberate close: ask once.
+        propose({ projectId: input.projectId, kind: "new_commitment", material: true, itemId: item.id,
+          summary: `Confirm commitment again: ${item.title}`, detail: "You marked this a promise again, but it was closed on purpose. Accepting reopens, confirms and locks it.",
+          patch: { op: "update_item", itemId: item.id, fields: { status: "open", basis: "confirmed", locked: true } }, provenance: [f.prov] });
+        return true;
+      }
+      return false;
+    }
+
+    /**
+     * Demote: a plan item whose meeting backing now comes only from ideas (tentative meeting items). An inferred,
+     * unlocked one becomes obsolete and its drafted commitment is withdrawn; one you locked or confirmed stays and a
+     * clarification asks you instead.
+     */
+    function reclassifyIdeas(): void {
+      const tentative = new Set(input.meetingItems.filter((m) => m.strength === "tentative").map((m) => m.id));
+      if (!tentative.size) return;
+      for (const item of store.items(input.projectId)) {
+        if (item.status === "obsolete" || item.status === "dropped" || item.status === "done") continue;
+        const sources = item.provenance.filter((p) => p.sourceKind === "meeting" && p.sourceId !== null).map((p) => String(p.sourceId));
+        if (!sources.length || !sources.every((id) => tentative.has(id))) continue;
+        const backing = item.provenance.find((p) => p.sourceKind === "meeting") ?? null;
+        if (item.locked || item.basis === "confirmed") {
+          propose({ projectId: input.projectId, kind: "clarification", material: true, itemId: item.id,
+            summary: `${KEEP_AS_COMMITMENT} ${item.title}`, detail: KEEP_AS_COMMITMENT,
+            patch: { op: "ack" }, provenance: backing ? [backing] : [] });
+          continue;
+        }
+        if (item.provenance.some((p) => p.sourceKind === "delivery-plan")) continue;
+        store.updateItem({ ...item, status: "obsolete", updatedAt: at });
+        report.itemsUpdated++;
+        for (const p of store.proposals(input.projectId)) {
+          if (p.status === "pending" && p.itemId === item.id && p.kind === "new_commitment") store.resolveProposal(p.id, "rejected", RECLASSIFIED_NOTE, at);
+        }
+        store.addChange({ projectId: input.projectId, kind: "item_updated", summary: `${RECLASSIFIED}, not a promise: ${item.title}`, itemId: item.id, sources: backing ? [backing.label] : [] }, at);
+      }
+    }
+
     applyCodeEvidence();
 
     function applyCodeEvidence(): void {
+      const none: string[] = [];
+      // Work events first (sorted, so the chosen evidence is deterministic); an explicit item link beats a title match.
+      const work = [...(input.workEvents ?? [])].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id))
+        .map((w) => ({ text: w.text, label: w.label, id: w.id, at: w.at, kind: w.kind, itemIds: w.itemIds }));
       const evidence = [
-        ...input.commits.map((c) => ({ text: c.subject, label: `Commit: ${c.subject}`, id: hash("git", c.subject), at: c.at ?? at, kind: "git" as const })),
-        ...input.tasks.filter((t) => t.status === "done").map((t) => ({ text: `${t.title} ${t.summary ?? ""}`, label: `Agent task done: ${t.title}`, id: `task:${t.id}`, at: t.updatedAt ?? at, kind: "agent-task" as const })),
+        ...work,
+        ...input.commits.map((c) => ({ text: c.subject, label: `Commit: ${c.subject}`, id: hash("git", c.subject), at: c.at ?? at, kind: "git" as const, itemIds: none })),
+        ...input.tasks.filter((t) => t.status === "done").map((t) => ({ text: `${t.title} ${t.summary ?? ""}`, label: `Agent task done: ${t.title}`, id: `task:${t.id}`, at: t.updatedAt ?? at, kind: "agent-task" as const, itemIds: none })),
       ];
       if (!evidence.length) return;
       for (const item of store.items(input.projectId)) {
         if ((item.kind !== "requirement" && item.kind !== "milestone") || item.status === "dropped" || item.status === "obsolete") continue;
         if (!["not_implemented", "unknown", "unverified"].includes(item.evidenceState)) continue;
-        const hit = evidence.find((e) => titleMatches(item.title, e.text));
+        const hit = evidence.find((e) => e.itemIds.includes(item.id)) ?? evidence.find((e) => titleMatches(item.title, e.text));
         if (!hit) continue;
         const prov: Provenance = { sourceKind: hit.kind, sourceId: hit.id, label: hit.label, quote: null, observedAt: hit.at, confidence: "medium", link: null };
         if (item.locked) {

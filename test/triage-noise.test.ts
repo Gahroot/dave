@@ -12,7 +12,7 @@ function mi(over: Partial<MeetingItem> & { id: string }): MeetingItem {
   return {
     recordingId: "100", kind: "commitment", text: `Text ${over.id}`, quote: SECRET, atSeconds: 5, speaker: "Me", speakerRole: "me",
     projectId: "p1", projectName: "Acme", projectSource: "user", duePhrase: null, dueDate: null, feature: null, status: "open",
-    suggestedStatus: null, statusSource: "model", statusNote: null, statusChangedAt: null, edited: false, agentRunId: null,
+    suggestedStatus: null, statusSource: "model", statusNote: null, statusChangedAt: null, edited: false, agentRunId: null, strength: "firm", strengthSource: null, deliverable: null,
     createdAt: daysAgo(40), updatedAt: daysAgo(40), meetingTitle: "Acme weekly", meetingAt: daysAgo(40), meetingUrl: null, ...over,
   };
 }
@@ -55,7 +55,7 @@ describe("classifyNoise", () => {
     expect(entries[1]?.reasons).toContain("No due date");
     expect(entries[2]?.reasons[0]).toBe("DAVE thinks this is done");
     expect(entries[4]?.meetingTitle).toBe("Acme weekly");
-    expect(countByBucket(entries)).toEqual({ overdue_promises: 1, stale_promises: 1, looks_done: 1, old_asks: 1, meeting_decisions: 1 });
+    expect(countByBucket(entries)).toEqual({ overdue_promises: 1, stale_promises: 1, looks_done: 1, old_asks: 1, meeting_decisions: 1, ideas: 0 });
   });
 
   it("skips decisions covered by a listed meeting item", () => {

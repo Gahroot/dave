@@ -30,10 +30,19 @@ import { registerTriageRoutes } from "./triage-routes.ts";
 import { createMobileService, type MobileServiceOptions } from "../mobile/service.ts";
 import { mobileSettings } from "../mobile/settings.ts";
 import { registerMobileRoutes } from "./mobile-routes.ts";
+import { createWorkService } from "../work/service.ts";
+import { readWorkEvidence } from "../work/store.ts";
+import { registerWorkRoutes } from "./work-routes.ts";
+import { ledgerService } from "../intel/ledger.ts";
+import { registerReviewRoutes } from "./review-routes.ts";
+import { createNextService } from "../intel/next.ts";
+import { registerNextRoutes } from "./next-routes.ts";
 
 const DIST = fileURLToPath(new URL("../../dist", import.meta.url));
 
 export async function buildServer(paths = sourcePaths(), options: { browserOrigins?: string[]; providers?: ProviderService; agentOptions?: AgentOptions; meetings?: MeetingServiceOptions; startMeetingScheduler?: boolean; startIntelScheduler?: boolean;
+  /** Real server entry only: poll EZ Coder runs, local git and (opt-in) GitHub every minute. Tests never start it. */
+  startWorkWatcher?: boolean;
   voice?: { fetch?: typeof fetch; now?: () => Date }; documents?: { extractor?: TextExtractor }; mobile?: MobileServiceOptions; startMobileGateway?: boolean } = {}) {
   const app = Fastify({ logger: false });
   const origins = options.browserOrigins ?? localBrowserOrigins(Number(process.env.PORT ?? 4317));
@@ -48,9 +57,17 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
   try { registerAgentRoutes(app, db, paths.appHome, options.agentOptions); }
   catch(e) { await app.close(); throw e; }
   const repo = makeRepo(db);
+  // Recommendation ledger: logs every pick DAVE makes and how it was resolved. Writes only its own tables.
+  // Names resolve lazily (projectNameOf is declared below and only called at runtime).
+  const ledger = ledgerService(db, { now: () => new Date(), projectName: (id) => projectNameOf(id) });
   // Delivery Intelligence: deterministic reconcile + prioritiser. Reads only; never launches agents.
   // Rejecting a "Confirm commitment" decision also drops its still-open meeting promise (called at runtime only).
-  const intel = intelService(db, { latest: () => repo.latest(), onCommitmentRejected: (ids) => dropRejectedPromises(ids) });
+  // Linked work events (EZ Coder runs, commits, merged PRs) feed code evidence; every re-rank is logged in the ledger.
+  const intel = intelService(db, {
+    latest: () => repo.latest(), onCommitmentRejected: (ids) => dropRejectedPromises(ids),
+    workEvidence: (projectId) => readWorkEvidence(db, projectId, new Date()),
+    onRecommendations: (snapshot) => ledger.observe(snapshot),
+  });
   app.addHook("onClose", async () => { intel.close(); });
   // Meeting promises and client ideas join the Inbox inside refresh's own save
   // step, and again whenever meetings change between refreshes.
@@ -92,6 +109,22 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
   app.addHook("onClose", async () => { await meetings.close(); });
   registerMeetingRoutes(app, meetings);
   registerIntelRoutes(app, intel);
+  // Completion loop: notices finished work, reconciles that project and reports what moved. Read-only on sources.
+  const work = createWorkService({
+    db, paths, intel,
+    projects: () => {
+      const latest = repo.latest();
+      return latest ? latest.active.filter((p) => p.exists && !p.override.hidden)
+        .map((p) => ({ id: p.id, name: p.name, path: p.canonicalPath })).sort((a, b) => a.id.localeCompare(b.id)) : [];
+    },
+  });
+  app.addHook("onClose", async () => { work.close(); });
+  work.onProgress((report) => ledger.onProgress(report));
+  registerWorkRoutes(app, work);
+  // Prepared next actions and the briefing. Record ops only: DAVE never starts work (hand_to_ezcoder is refused).
+  const next = createNextService({ db, intel, meetings, work, ledger, now: () => new Date() });
+  registerNextRoutes(app, next);
+  registerReviewRoutes(app, ledger, intel);
   // Talk to DAVE. Registered last so it closes first (voice, then documents, then the hooks above).
   // Nothing here touches the network or the Keychain until the user starts a voice session.
   const visibleProjects = () => {
@@ -129,6 +162,9 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
     meetings: {
       items: (filter) => meetings.items(filter),
       setItemStatus: (id, action) => meetings.setItemStatus(id, action),
+      setItemStrength: (id, strength) => meetings.setItemStrength(id, strength),
+      recentMeetings: (limit) => meetings.list().filter((m) => m.status === "analyzed").slice(0, Math.max(0, limit))
+        .map((m) => ({ recordingId: m.recordingId, title: m.title, at: m.startedAt ?? m.createdAt })),
       syncNow: () => meetings.syncNow(),
       fathomConnected: () => !!meetingItems.settings().connectedAt,
     },
@@ -142,6 +178,7 @@ export async function buildServer(paths = sourcePaths(), options: { browserOrigi
   // Only the real server entry point polls Fathom; tests never start the timer.
   if (options.startMeetingScheduler) meetings.startScheduler();
   if (options.startIntelScheduler) intel.startScheduler();
+  if (options.startWorkWatcher) work.start();
   // Phone access: registered after the database hook so the LAN listener closes
   // first. It binds only when the entry point (or an explicit test) asks.
   const [firstOrigin = ""] = origins;
@@ -165,7 +202,7 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT ?? 4317);
   // Explicit dev proxy origins only; never trust X-Forwarded-* supplied by clients.
   const extraOrigins = process.env.PCC_BROWSER_ORIGINS?.split(",").map((origin) => origin.trim()).filter(Boolean) ?? [];
-  const app = await buildServer(sourcePaths(), { browserOrigins: [...localBrowserOrigins(port), ...extraOrigins], startMeetingScheduler: true, startIntelScheduler: true, startMobileGateway: true });
+  const app = await buildServer(sourcePaths(), { browserOrigins: [...localBrowserOrigins(port), ...extraOrigins], startMeetingScheduler: true, startIntelScheduler: true, startWorkWatcher: true, startMobileGateway: true });
   await app.listen({ port, host: "127.0.0.1" });
   console.log(`Portfolio Command Center → http://127.0.0.1:${port}`);
   let stopping = false;

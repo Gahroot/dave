@@ -50,7 +50,8 @@ describe('item checks', () => {
   it('keeps a verified promise with its real speaker, time and resolved date', () => {
     const result = run({ my_commitments: [promise()] });
     expect(result).toEqual({ ok: true, value: expect.objectContaining({
-      items: [{ kind: 'commitment', text: 'Send the API docs', quote: "I'll send the API docs by Friday", turn: 3, at: 30, speaker: 'Dave', role: 'me', project: 'P1', duePhrase: 'by Friday', dueDate: '2026-10-02', feature: null }],
+      items: [{ kind: 'commitment', text: 'Send the API docs', quote: "I'll send the API docs by Friday", turn: 3, at: 30, speaker: 'Dave', role: 'me', project: 'P1', duePhrase: 'by Friday', dueDate: '2026-10-02', feature: null,
+        strength: 'firm', strengthSource: 'rule', deliverable: null, owedTo: null }],
     }) });
   });
 
@@ -123,5 +124,44 @@ describe('item checks', () => {
     const result = run({ status_updates: [update, { ...update, commitment: 'C7' }, { ...update, quote: 'The staging link never arrived' }, { ...update, status: 'closed' }] });
     expect(result.ok && result.value.statusUpdates).toEqual([{ commitment: 'C1', status: 'done', quote: update.quote, turn: 7, at: 70, speaker: 'Jane' }]);
     expect(result.ok && result.value.dropped).toMatchObject({ unknownHandle: 1, quoteNotFound: 1, invalid: 1 });
+  });
+});
+
+describe('meetings-v2 strength', () => {
+  const V2: VerifyContext = { ...CTX, requireStrength: true };
+  it('parses mixed strengths: the model and the rule combine, and the rule decides alone for a legacy answer', () => {
+    const result = run({
+      my_commitments: [
+        promise({ strength: 'firm', deliverable: 'API docs', owed_to: 'client' }),
+        promise({ text: 'Look at the export timeout', strength: 'tentative', deliverable: null, owed_to: 'client', due_phrase: null, due_date: null, quote: 'look at the export timeout', turn: 'T3' }),
+      ],
+      client_suggestions: [{ text: 'Filter archived invoices', strength: 'request', project: 'P1', quote: 'Could you add a filter for archived invoices?', turn: 'T5' }],
+      decisions: [{ text: 'Archive filter ships next release', strength: 'firm', project: null, quote: 'Agreed, we ship the archive filter in the next release.', turn: 'T6' }],
+    }, V2);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.items.map(i => [i.kind, i.strength, i.strengthSource, i.deliverable, i.owedTo])).toEqual([
+      ['commitment', 'firm', 'model', 'API docs', 'client'],
+      ['commitment', 'tentative', 'model', null, 'client'],
+      ['suggestion', 'firm', 'model', null, null],
+      ['decision', 'firm', 'model', null, null],
+    ]);
+    const legacy = run({ my_commitments: [promise()] });
+    expect(legacy.ok && legacy.value.items[0]).toMatchObject({ strength: 'firm', strengthSource: 'rule' });
+  });
+
+  it('requires strength, deliverable and owed_to on v2 commitments and validates the enums', () => {
+    const drop = (patch: Record<string, unknown>) => { const r = run(patch, V2); return r.ok ? r.value.dropped.invalid : -1; };
+    expect(drop({ my_commitments: [promise()] })).toBe(1);
+    expect(drop({ my_commitments: [promise({ strength: 'maybe', deliverable: null, owed_to: 'client' })] })).toBe(1);
+    expect(drop({ my_commitments: [promise({ strength: 'firm', deliverable: null, owed_to: 'boss' })] })).toBe(1);
+    expect(drop({ client_suggestions: [{ text: 'Filter', strength: 'firm', quote: 'Could you add a filter for archived invoices?', turn: 'T5' }] })).toBe(1);
+    expect(drop({ decisions: [{ text: 'Archive filter', strength: 'request', quote: 'Agreed, we ship the archive filter in the next release.', turn: 'T6' }] })).toBe(1);
+  });
+
+  it('a hedge in the quote beats a firm answer from the model', () => {
+    const turns = TURNS.map(t => t.index === 4 ? { ...t, role: 'me' as const, speaker: 'Dave', text: 'Maybe I can pair on the export query tomorrow.' } : t);
+    const r = parseExtraction(JSON.stringify({ ...EMPTY, my_commitments: [promise({ text: 'Pair on the export query', strength: 'firm', deliverable: null, owed_to: 'teammate', due_phrase: null, due_date: null, quote: 'Maybe I can pair on the export query tomorrow.', turn: 'T4' })] }), { ...V2, turns });
+    expect(r.ok && r.value.items[0]).toMatchObject({ strength: 'tentative', strengthSource: 'model', owedTo: 'teammate' });
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
-import { AudioLines, Check, CheckCheck, Undo2, ShieldCheck, Copy, FileText, Hand, Mic, MicOff, Paperclip, PhoneOff, Send, Settings, X } from "lucide-react";
+import { AudioLines, Check, CheckCheck, Undo2, ShieldCheck, Copy, FileText, Hand, Mic, MicOff, Moon, Paperclip, PhoneOff, Send, Settings, Sun, X } from "lucide-react";
 import { DaveMascot } from "../mascot/DaveMascot.tsx";
 import { LedText } from "../mascot/LedText.tsx";
 import { MoodGallery } from "../mascot/MoodGallery.tsx";
@@ -25,6 +25,9 @@ export function VoicePanel({ variant }: VoicePanelProps) {
   const active = isActive(state);
   const live = state.phase === "live";
   const mood = mascotMood(state);
+  const theme = voice.theme;
+  const [themeError, setThemeError] = useState<string | null>(null);
+  const toggleTheme = () => { void voice.saveSettings({ theme: theme === "light" ? "dark" : "light" }).then(setThemeError); };
 
   useEffect(() => { if (variant === "drawer") root.current?.focus(); }, [variant]);
   // Undo, Turn off and Approve all swap to plain text once used, and End is disabled while the call closes. If the
@@ -59,15 +62,19 @@ export function VoicePanel({ variant }: VoicePanelProps) {
     : state.phase === "idle" || state.phase === "ended" ? (voice.status?.availability.state === "unavailable" ? voice.status.availability.message : state.phase === "ended" ? "Conversation saved. Talk again any time." : "Press Talk and say what matters most this week.")
     : `DAVE is ${MOOD_LABEL[mood]}.`;
 
-  return <section ref={root} tabIndex={-1} data-voice-panel className={`voice-stage voice-${variant}${dragging ? " voice-dragging" : ""}`}
+  return <section ref={root} tabIndex={-1} data-voice-panel data-theme={theme} className={`voice-stage voice-${variant}${theme === "light" ? " voice-theme-light" : ""}${dragging ? " voice-dragging" : ""}`}
     role={variant === "drawer" ? "dialog" : "region"} aria-label="Talk to DAVE" onKeyDown={onKeyDown} onFocus={e => { if (e.target instanceof HTMLElement) lastFocus.current = e.target; }}
     onDragOver={e => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }} onDragLeave={e => { if (e.currentTarget === e.target) setDragging(false); }} onDrop={onDrop} onPaste={onPaste}>
     <header className="voice-top">
       <div className="voice-topbar">
         <span className="voice-title">Talk to DAVE</span>
-        {variant === "drawer" && <button type="button" className="voice-icon-button" aria-label="Close voice panel (conversation keeps going)" onClick={voice.closePanel}><X size={20} aria-hidden="true" /></button>}
+        <div className="voice-top-actions">
+          <button type="button" className="voice-icon-button" aria-label="Light mode" aria-pressed={theme === "light"} title={theme === "light" ? "Switch to the dark stage" : "Switch to the light stage"} onClick={toggleTheme}>{theme === "light" ? <Moon size={20} aria-hidden="true" /> : <Sun size={20} aria-hidden="true" />}</button>
+          {variant === "drawer" && <button type="button" className="voice-icon-button" aria-label="Close voice panel (conversation keeps going)" onClick={voice.closePanel}><X size={20} aria-hidden="true" /></button>}
+        </div>
       </div>
-      <DaveMascot mood={mood} size={180} levels={voice.levels} className="voice-hero" />
+      {themeError && <p className="voice-theme-error" role="alert">{themeError}</p>}
+      <DaveMascot mood={mood} size={180} theme={theme} levels={voice.levels} className="voice-hero" />
       <LedText text={voiceStatusLabel(state)} tone={state.phase === "error" ? "oops" : active ? "lit" : "dim"} className="voice-led" />
       <p className="voice-detail">{detail}{voice.error?.connect && <> <a href="#connections">Open Connections</a></>}</p>
       {live && voice.approval.on && <div className="voice-approval-banner" role="note">
@@ -100,7 +107,6 @@ export function VoicePanel({ variant }: VoicePanelProps) {
           ? <button type="button" className={`voice-round${voice.holding ? " voice-on" : ""}`} disabled={!live} aria-pressed={voice.holding} aria-label="Hold to talk (or hold Space)"
             onPointerDown={() => voice.pushToTalk("down")} onPointerUp={() => voice.pushToTalk("up")} onPointerLeave={() => { if (voice.holding) voice.pushToTalk("up"); }}><Hand size={20} aria-hidden="true" /></button>
           : <button type="button" className={`voice-round${voice.muted ? " voice-on" : ""}`} disabled={!live} aria-pressed={voice.muted} aria-label={voice.muted ? "Unmute microphone" : "Mute microphone"} onClick={voice.toggleMute}>{voice.muted ? <MicOff size={20} aria-hidden="true" /> : <Mic size={20} aria-hidden="true" />}</button>}
-        {!active && <label className="voice-check voice-approve-toggle"><input type="checkbox" checked={voice.approveOnStart} onChange={e => voice.setApproveOnStart(e.target.checked)} />Approve all for this session</label>}
         <button type="button" className="voice-round" aria-label="Share a file" onClick={() => fileInput.current?.click()}><Paperclip size={20} aria-hidden="true" /></button>
         <input ref={fileInput} type="file" multiple hidden onChange={e => { share(e.currentTarget.files); e.currentTarget.value = ""; }} />
         <button type="button" className="voice-round" aria-label="Voice settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(v => !v)}><Settings size={20} aria-hidden="true" /></button>
@@ -189,11 +195,12 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
       <label>Mode<select value={settings.mode} onChange={e => save({ mode: e.target.value as VoiceMode })}><option value="hands_free">Hands-free</option><option value="push_to_talk">Push to talk</option></select></label>
       <label className="voice-check"><input type="checkbox" checked={settings.greeting} onChange={e => save({ greeting: e.target.checked })} />DAVE speaks first</label>
       <label className="voice-check"><input type="checkbox" checked={settings.sounds} onChange={e => save({ sounds: e.target.checked })} />Start and stop sounds</label>
-      <p className="voice-hint">Changes apply to the next conversation.</p>
+      <label className="voice-check"><input type="checkbox" checked={settings.theme === "light"} onChange={e => save({ theme: e.target.checked ? "light" : "dark" })} />Light mode</label>
+      <p className="voice-hint">Light mode applies at once. The other settings apply to the next conversation.</p>
     </div> : <p>Settings are loading…</p>}
     {message && <p className="voice-card-state" role="alert">{message}</p>}
     <h3>Meet DAVE</h3>
-    <MoodGallery size={64} />
+    <MoodGallery size={64} theme={voice.theme} />
     <h3>Recent conversations</h3>
     {history === null ? <p>Loading…</p> : history.length ? <ul className="voice-list">{history.slice(0, 10).map(h => <li key={h.id}><strong>{new Date(h.startedAt).toLocaleString()}</strong>{h.projectName ? ` · ${h.projectName}` : ""}<br />{h.summary ?? `${h.lines} lines, ${h.actions} actions`}</li>)}</ul> : <p>No conversations yet.</p>}
     <h3>What DAVE remembers</h3>

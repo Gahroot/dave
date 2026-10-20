@@ -1,5 +1,6 @@
 import type { IntelItem, Proposal } from "../intel/types.ts";
 import type { MeetingItem } from "../meetings/types.ts";
+import { isTentative } from "../meetings/obligation.ts";
 import { linkedIntelItems, meetingSourceIds } from "./links.ts";
 import {
   OLD_ASK_DAYS, STALE_PROMISE_DAYS, TRIAGE_BUCKETS,
@@ -49,6 +50,11 @@ export function daysSince(iso: string | null, now: Date): number | null {
 const meetingWhen = (m: MeetingItem): string | null => m.meetingAt || m.createdAt || null;
 
 function bucketOf(m: MeetingItem, now: Date): { bucket: TriageBucket; kind: TriageKind } | null {
+  // Ideas mentioned (tentative) sit only in the ideas bucket, never with promises or asks.
+  if (isTentative(m)) {
+    if (m.status !== "open") return null;
+    return { bucket: "ideas", kind: m.kind === "commitment" ? "promise" : m.kind === "decision" ? "decision" : "ask" };
+  }
   const kind: TriageKind | null = m.kind === "commitment" ? "promise" : m.kind === "suggestion" || m.kind === "pain_point" ? "ask" : null;
   if (!kind) return null;
   if (m.status === "looks_done") return { bucket: "looks_done", kind };
@@ -63,12 +69,13 @@ function bucketOf(m: MeetingItem, now: Date): { bucket: TriageBucket; kind: Tria
 
 function meetingReasons(m: MeetingItem, bucket: TriageBucket, confirmed: boolean, now: Date): string[] {
   const reasons: string[] = [];
+  if (bucket === "ideas") reasons.push("Said as an idea, not a promise");
   if (bucket === "looks_done") reasons.push(m.suggestedStatus === "dropped" ? "DAVE thinks this was dropped" : "DAVE thinks this is done");
   if (m.dueDate && m.dueDate < today(now)) {
     const late = daysSince(m.dueDate, now) ?? 1;
     reasons.push(`Due ${shortDay(m.dueDate)}, ${late === 1 ? "1 day" : `${late} days`} ago`);
   }
-  else if (m.kind === "commitment") reasons.push(m.dueDate ? `Due ${shortDay(m.dueDate)}` : "No due date");
+  else if (m.kind === "commitment" && bucket !== "ideas") reasons.push(m.dueDate ? `Due ${shortDay(m.dueDate)}` : "No due date");
   const age = daysSince(meetingWhen(m), now);
   if (age !== null) reasons.push(`From a meeting ${ago(age)}`);
   if (!confirmed) reasons.push("Never confirmed");
@@ -91,6 +98,7 @@ function decisionEntry(p: Proposal, byId: ReadonlyMap<string, IntelItem>, now: D
     key: `p:${p.id}`, kind: "decision", bucket: "meeting_decisions", title: p.summary,
     projectId: p.projectId, projectName: p.projectName || null, dueDate: null,
     meetingAt: latest?.observedAt ?? null, meetingTitle: latest ? titleOfLabel(latest.label) : null,
+    recordingId: latest?.link ? /[?&]rec=([A-Za-z0-9_-]{1,128})/.exec(latest.link)?.[1] ?? null : null,
     reasons, confirmed,
   };
 }
@@ -119,7 +127,7 @@ export function classifyNoise(input: NoiseInput): TriageEntry[] {
     entries.push({
       key: `m:${m.id}`, kind: placed.kind, bucket: placed.bucket, title: m.text,
       projectId: m.projectId, projectName: m.projectName ?? (m.projectId ? input.projectName?.(m.projectId) ?? null : null),
-      dueDate: m.dueDate, meetingAt: meetingWhen(m), meetingTitle: m.meetingTitle || null,
+      dueDate: m.dueDate, meetingAt: meetingWhen(m), meetingTitle: m.meetingTitle || null, recordingId: m.recordingId,
       reasons: meetingReasons(m, placed.bucket, confirmed, now), confirmed,
     });
   }
@@ -144,6 +152,7 @@ export function filterEntries(entries: readonly TriageEntry[], filter: TriageFil
     if (filter.buckets?.length && !filter.buckets.includes(e.bucket)) return false;
     if (filter.kinds?.length && !filter.kinds.includes(e.kind)) return false;
     if (filter.projectId !== undefined && e.projectId !== filter.projectId) return false;
+    if (filter.recordingId !== undefined && e.recordingId !== filter.recordingId) return false;
     if (!filter.includeConfirmed && e.confirmed) return false;
     if (filter.overdueOnly && !(e.dueDate && e.dueDate < day)) return false;
     if (filter.olderThanDays !== undefined && (daysSince(e.meetingAt, now) ?? -1) < filter.olderThanDays) return false;

@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Group, List, Modal, NativeSelect, Stack, Text } from "@mantine/core";
-import { Calendar, ExternalLink, FileText, Folder, Sparkles, Trash2, Users } from "lucide-react";
+import { Calendar, ExternalLink, FileText, Folder, Lightbulb, Sparkles, Trash2, Users } from "lucide-react";
 import { StatusMark } from "../components/Status.tsx";
 import { ITEM_KIND, MEETING_STATUS as MEETING_MARK } from "../status.ts";
 import type { MeetingDetail as Detail, MeetingItem, MeetingsState } from "../../meetings/types.ts";
 import { deliveryApi } from "../delivery-api.ts";
-import { ITEM_KIND_LABELS, MEETING_STATUS_LABELS } from "../meetings-model.ts";
+import { IDEAS_LABEL, ITEM_KIND_LABELS, MEETING_STATUS_LABELS, splitByStrength } from "../meetings-model.ts";
 import { routeLink } from "../navigation.ts";
 import { DetailHeader, EmptyState, PanelHead } from "../components/WorkspacePrimitives.tsx";
-import { MeetingItemRow, type ItemAction } from "../components/MeetingItemRow.tsx";
+import { MeetingItemRow, type ItemAction, type ItemStrength } from "../components/MeetingItemRow.tsx";
 import { MeetingDisclosure } from "../components/MeetingDisclosure.tsx";
 
 type Choices = { projects: { id: string; name: string }[] };
@@ -66,6 +66,8 @@ export function MeetingDetail({ recordingId, back, state, onChanged, paused }: {
     if (await run(() => deliveryApi(`/api/meetings/recordings/${encodeURIComponent(recordingId)}/analyze`, body), "Analysis started. This page updates when it finishes.")) { setReviewing(false); setAgreed(false); }
   };
   const onAction = (item: MeetingItem, action: ItemAction) => void run(() => deliveryApi(`/api/meetings/items/${encodeURIComponent(item.id)}/status`, { action }), "Saved.");
+  const onStrength = (item: MeetingItem, strength: ItemStrength) => void run(() => deliveryApi(`/api/meetings/items/${encodeURIComponent(item.id)}/strength`, { strength }),
+    strength === "firm" ? "Marked as a promise. It is back in your plan and Inbox." : "Marked as an idea. It no longer counts as a promise.");
   const saveProject = () => void run(() => deliveryApi(`/api/meetings/recordings/${encodeURIComponent(recordingId)}/project`, { projectId: project || null, remember: remember && !!project }), remember ? "Project saved and remembered for this company." : "Project saved.");
   const forget = async () => { if (await run(() => deliveryApi(`/api/meetings/recordings/${encodeURIComponent(recordingId)}/forget`, {}), "Meeting forgotten.")) location.hash = back; };
 
@@ -80,7 +82,9 @@ export function MeetingDetail({ recordingId, back, state, onChanged, paused }: {
   const when = new Date(detail.startedAt ?? detail.createdAt);
   const minutes = detail.startedAt && detail.endedAt ? Math.round((Date.parse(detail.endedAt) - Date.parse(detail.startedAt)) / 60_000) : null;
   const here = routeLink("meetings", { section: "list", rec: recordingId });
-  const byKind = KIND_ORDER.map(kind => ({ kind, items: detail.items.filter(i => i.kind === kind) })).filter(g => g.items.length > 0);
+  // Promises, asks and agreed decisions first; ideas wait in a collapsed group and never count.
+  const { firm, ideas } = splitByStrength(detail.items);
+  const byKind = KIND_ORDER.map(kind => ({ kind, items: firm.filter(i => i.kind === kind) })).filter(g => g.items.length > 0);
 
   return <Stack gap="md" className="meeting-detail">
     <DetailHeader title={detail.title} back={back} backLabel="All meetings">
@@ -120,9 +124,14 @@ export function MeetingDetail({ recordingId, back, state, onChanged, paused }: {
 
     {byKind.map(group => <section key={group.kind} aria-labelledby={`kind-${group.kind}`} className="meeting-group app-panel">
       <PanelHead id={`kind-${group.kind}`} title={`${ITEM_KIND_LABELS[group.kind]}${group.items.length > 1 ? "s" : ""}`} spec={ITEM_KIND[group.kind]} count={group.items.length} />
-      <ul className="meeting-list">{group.items.map(item => <MeetingItemRow key={item.id} item={item} busy={busy} onAction={onAction} returnTo={here} showMeeting={false} showKind={false} showProject={item.projectId !== detail.projectId} />)}</ul>
+      <ul className="meeting-list">{group.items.map(item => <MeetingItemRow key={item.id} item={item} busy={busy} onAction={onAction} onStrength={onStrength} returnTo={here} showMeeting={false} showKind={false} showProject={item.projectId !== detail.projectId} />)}</ul>
     </section>)}
-    {detail.status === "analyzed" && byKind.length === 0 && <div className="app-panel"><EmptyState title="Nothing to track from this meeting">No promises, client asks or decisions about project work were found.</EmptyState></div>}
+    {ideas.length > 0 && <details className="panel-disclosure meeting-ideas app-panel" aria-label={IDEAS_LABEL}>
+      <summary><Lightbulb size={16} aria-hidden="true" /> {IDEAS_LABEL} ({ideas.length})</summary>
+      <Text size="sm" c="dimmed" className="panel-body">Maybes and brainstorming from this meeting. They make no Inbox rows, follow-up checks or plan commitments until you mark one as a promise.</Text>
+      <ul className="meeting-list">{ideas.map(item => <MeetingItemRow key={item.id} item={item} busy={busy} onAction={onAction} onStrength={onStrength} returnTo={here} showMeeting={false} showProject={item.projectId !== detail.projectId} />)}</ul>
+    </details>}
+    {detail.status === "analyzed" && byKind.length === 0 && ideas.length === 0 && <div className="app-panel"><EmptyState title="Nothing to track from this meeting">No promises, client asks or decisions about project work were found.</EmptyState></div>}
 
     <Modal opened={reviewing && !!state} onClose={() => { setReviewing(false); setAgreed(false); }} title="Analyze this meeting?" centered size="lg">
       {state && <Stack>

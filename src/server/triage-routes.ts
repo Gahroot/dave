@@ -2,11 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { strictObject } from "./provider-routes.ts";
 import type { TriageService } from "../triage/service.ts";
 import {
-  MAX_APPLY_KEYS, TRIAGE_ACTIONS, TRIAGE_BATCH_ID, TRIAGE_BUCKETS, TRIAGE_KEY, TRIAGE_KINDS,
+  MAX_APPLY_KEYS, TRIAGE_ACTIONS, TRIAGE_BATCH_ID, TRIAGE_BUCKETS, TRIAGE_KEY, TRIAGE_KINDS, TRIAGE_RECORDING_ID,
   type TriageAction, type TriageBucket, type TriageFilter, type TriageKind,
 } from "../triage/types.ts";
 
-const FILTER_FIELDS = ["buckets", "projectId", "kinds", "olderThanDays", "overdueOnly", "includeConfirmed", "text", "keys"];
+const FILTER_FIELDS = ["buckets", "projectId", "kinds", "olderThanDays", "overdueOnly", "includeConfirmed", "text", "keys", "recordingId"];
 const bad = (): Error => Object.assign(new Error("Invalid request"), { statusCode: 400 });
 
 function list<T extends string>(v: unknown, allowed: readonly T[], max: number): T[] {
@@ -36,6 +36,11 @@ export function parseFilter(value: unknown): TriageFilter {
   if (value.includeConfirmed !== undefined) f.includeConfirmed = bool(value.includeConfirmed);
   if (value.text !== undefined) f.text = shortText(value.text);
   if (value.keys !== undefined) f.keys = keys(value.keys, 0);
+  if (value.recordingId !== undefined) {
+    const r = value.recordingId;
+    if (typeof r !== "string" || !TRIAGE_RECORDING_ID.test(r)) throw bad();
+    f.recordingId = r;
+  }
   return f;
 }
 

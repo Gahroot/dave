@@ -3,7 +3,7 @@ import type { FocusState } from "../../intel/types.ts";
 import { intelApi } from "../intel-api.ts";
 import { triageApi } from "../triage-api.ts";
 import type { DaveLevels } from "../mascot/types.ts";
-import { DATA_CHANGED_EVENT, LIMITS, type DataChangedDetail, type EndReason, type StartSessionResponse, type ApprovalVia, type ToolCallResponse, type VoiceMode, type VoiceSettings, type VoiceStatus } from "../../voice/types.ts";
+import { DATA_CHANGED_EVENT, LIMITS, type DataChangedDetail, type EndReason, type StartSessionResponse, type ApprovalVia, type ToolCallResponse, type VoiceMode, type VoiceSettings, type VoiceStatus, type VoiceTheme } from "../../voice/types.ts";
 import { voiceApi, VoiceRequestError } from "./api.ts";
 import { INITIAL_VOICE_STATE, isActive, phaseAnnouncement, voiceReducer, type VoiceState } from "./machine.ts";
 import { appendCard, appendLine, approvalAnnouncement, approvalNote, cardsFromToolResponse, confirmNote, openConfirmIds, UNDO_NOTE, undoState, USER_WORDS_WAIT_MS, contextNote, documentTextNote, downscalePlan, focusChips, focusUpdateNote, imageSendable, isTypingTarget, matchShortcut, pageContext, sharedNote, transcriptOf, updateCard, type FocusChips, type TimelineEntry, type VoiceCard } from "./model.ts";
@@ -24,6 +24,8 @@ export type VoiceContextValue = {
   caption: { user: string; assistant: string };
   status: VoiceStatus | null;
   settings: VoiceSettings | null;
+  /** Display-only stage theme; never sent to the model. */
+  theme: VoiceTheme;
   mode: VoiceMode;
   muted: boolean;
   holding: boolean;
@@ -42,9 +44,6 @@ export type VoiceContextValue = {
   sendText: (text: string, options?: { fromUser?: boolean }) => void;
   approval: { on: boolean; via: ApprovalVia | null };
   setApproval: (on: boolean) => void;
-  /** Idle toggle: turn Approve all on right after the next session starts (a human click). */
-  approveOnStart: boolean;
-  setApproveOnStart: (on: boolean) => void;
   undoCleanUp: (cardId: string) => void;
   shareFiles: (files: readonly File[]) => void;
   answerConfirm: (cardId: string, accept: boolean) => void;
@@ -113,10 +112,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<VoiceMode>("hands_free");
   const [levels, setLevels] = useState<DaveLevels>(ZERO_LEVELS);
   const [approval, setApprovalState] = useState<{ on: boolean; via: ApprovalVia | null }>({ on: false, via: null });
-  const [approveOnStart, setApproveOnStart] = useState(false);
   const [approvalSaid, setApprovalSaid] = useState("");
-  const approveOnStartRef = useRef(false);
-  approveOnStartRef.current = approveOnStart;
   // The provider sits above the routed workspace, so it follows the hash itself for the "Looking at" chip.
   const [hash, setHash] = useState(() => typeof window === "undefined" ? "" : window.location.hash);
   const live = useRef<Live | null>(null);
@@ -260,7 +256,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             onReady: () => {
               if (live.current !== current) return;
               dispatch({ type: "ready" }); lastSpeech.current = Date.now(); playChime("start", sounds());
-              if (approveOnStartRef.current) applyApproval(current, true);
             },
             onFunctionCall: call => { if (live.current === current) runTool(current, call.callId, call.name, call.args); },
             onCaption: (role, text) => setCaption(c => ({ ...c, [role]: text })),
@@ -521,10 +516,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const lookingAt = lookingAtId ? focus?.projects.find(p => p.projectId === lookingAtId)?.projectName ?? null : null;
 
   const value = useMemo<VoiceContextValue>(() => ({
-    state, entries, caption, status, settings: status?.settings ?? null, mode, muted, holding, error, chips: focusChips(focus), lookingAt, levels, open,
+    state, entries, caption, status, settings: status?.settings ?? null, theme: status?.settings.theme ?? "dark", mode, muted, holding, error, chips: focusChips(focus), lookingAt, levels, open,
     openPanel, closePanel, start, end, toggleMute, pushToTalk, sendText, shareFiles, answerConfirm, copyCard, askAbout, saveSettings,
-    approval, setApproval, approveOnStart, setApproveOnStart, undoCleanUp,
-  }), [state, entries, caption, status, mode, muted, holding, error, focus, lookingAt, levels, open, openPanel, closePanel, start, end, toggleMute, pushToTalk, sendText, shareFiles, answerConfirm, copyCard, askAbout, saveSettings, approval, setApproval, approveOnStart, undoCleanUp]);
+    approval, setApproval, undoCleanUp,
+  }), [state, entries, caption, status, mode, muted, holding, error, focus, lookingAt, levels, open, openPanel, closePanel, start, end, toggleMute, pushToTalk, sendText, shareFiles, answerConfirm, copyCard, askAbout, saveSettings, approval, setApproval, undoCleanUp]);
 
   const announcement = phaseAnnouncement(state.phase === "live" ? { phase: "live", flags: { userSpeaking: false, modelSpeaking: false, responseActive: false, tools: 0 } } : state);
   return <VoiceContext.Provider value={value}>
